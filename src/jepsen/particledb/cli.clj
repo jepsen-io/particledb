@@ -277,7 +277,7 @@
     :validate [txn-modes (cli/one-of txn-modes)]]
 
    ["-v" "--version VERSION" "What version should we test?"
-    :default "latest"]
+    :default "1.1.4"]
 
    [nil "--wal-sync-mode MODE" "The WAL sync mode for ParticleDB"
     :parse-fn keyword

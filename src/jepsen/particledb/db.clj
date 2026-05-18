@@ -41,7 +41,7 @@
   "Install ParticleDB"
   [test]
   (c/su
-    (let [url (str "https://pdb-releases-193278869920-us-east-1.s3.us-east-1.amazonaws.com/" (:version test) "/particledb-linux-x86_64")
+    (let [url (str "https://pdb-releases-193278869920-us-east-1.s3.us-east-1.amazonaws.com/v" (:version test) "/particledb-linux-x86_64")
           path (cu/cached-wget! url)]
       (c/exec :mkdir :-p dir)
       (c/exec :cp path bin)
