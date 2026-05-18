@@ -16,6 +16,7 @@
                     [util :as util]]
             [jepsen.particledb [db :as db]
                                [nemesis :as nemesis]]
+            [jepsen.postgres [cli :as pcli]]
             [jepsen.os.debian :as debian]))
 
 (def wal-sync-modes
@@ -29,11 +30,12 @@
 (def workloads
   "A map of workload names to functions that take CLI options and return
   workload maps"
-  {:none          (constantly tests/noop-test)})
+  (merge pcli/workloads
+         {:none (constantly tests/noop-test)}))
 
 (def standard-workloads
   "All the workloads we run by default."
-  [:none])
+  [:append :ledger])
 
 (def nemeses
   "Basic nemeses we have available."
@@ -103,6 +105,10 @@
   [opts]
   (str (:version opts) " "
        (name (:workload opts))
+       (when-let [m (:wal-sync-mode opts)]
+         (str " wal=" (name m)))
+       (when-let [m (:txn-mode opts)]
+         (str " txn=" (name m)))
        (when (:lazyfs opts)
          " lazyfs")
        (when-let [cft (:corrupt-file-type opts)]
@@ -209,6 +215,10 @@
     :parse-fn keyword
     :validate [nemesis/file-types (cli/one-of nemesis/file-types)]]
 
+    [nil "--expected-consistency-model MODEL" "What level of isolation do we *expect* to observe? Defaults to strong-serializable."
+    :default :strong-serializable
+    :parse-fn keyword]
+
    [nil "--final-time-limit SECONDS" "How long should we run the final generator for, at most? In seconds."
     :default  300
     :parse-fn read-string
@@ -218,6 +228,15 @@
     :default  10
     :parse-fn read-string
     :validate [#(and (number? %) (pos? %)) "must be a positive number"]]
+
+    ["-i" "--isolation LEVEL" "What level of isolation we should set: serializable, repeatable-read, etc."
+    :default :serializable
+    :parse-fn keyword
+    :validate [#{:read-uncommitted
+                 :read-committed
+                 :repeatable-read
+                 :serializable}
+               "Should be one of read-uncommitted, read-committed, repeatable-read, or serializable"]]
 
    [nil "--key-count NUM" "Number of keys in active rotation."
     :default  10
@@ -255,6 +274,27 @@
    (cli/repeated-opt "-n" "--node HOSTNAME" "Node(s) to run test on. Flag may be submitted many times, with one node per flag."
                      ["n1"])
 
+   [nil "--on-conflict" "If set, uses an ON CONFLICT clause to upsert rows."]
+
+   [nil "--postgres-password PASS" "What password should we use to connect to postgres?"
+    :default "jepsenpw"]
+
+   [nil "--postgres-sslmode MODE" "What sslmode should we use to connect to the postgres interface? Should be either require or disable."
+    :default "disable"
+    :parse-fn str
+    :validate [#{"require" "disable"}
+               "Should be one of require, or disable"]]
+
+   [nil "--postgres-port NUMBER" "What port should we connect to when talking to the postgres interface?"
+    :default 5432
+    :parse-fn parse-long]
+
+   [nil "--postgres-user NAME" "What username should we use to connect to the Postgres interface?"
+    :default "admin"]
+
+   [nil "--prepare-threshold INT" "Passes a prepareThreshold option to the JDBC spec."
+    :parse-fn parse-long]
+
 
    ["-r" "--rate HZ" "Approximate request rate, in hz"
     :default  10000
@@ -284,7 +324,7 @@
     :validate [txn-modes (cli/one-of txn-modes)]]
 
    ["-w" "--workload NAME" "What workload should we run?"
-    :default  :none
+    :default  :append
     :parse-fn keyword
     :validate [workloads (cli/one-of workloads)]]
    ])

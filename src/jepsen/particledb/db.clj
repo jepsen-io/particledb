@@ -62,7 +62,7 @@
       (db/setup! lazyfs test node))
 
     (db/start! this test node)
-    (cu/await-tcp-port client/pg-port
+    (cu/await-tcp-port (:postgres-port test)
                        {:log-interval 10000}))
 
   (teardown! [this test node]
@@ -106,6 +106,8 @@
          bin
          :start
          :--data-dir data-dir
+         :--auth-method "password"
+         :--pg-password (:postgres-password test)
          (when-let [m (:wal-sync-mode test)] [:--wal-sync-mode (name m)])
          (when-let [m (:txn-mode test)]      [:--txn-mode      (name m)])))))
 
