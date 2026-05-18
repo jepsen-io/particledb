@@ -54,7 +54,7 @@
   "Kills and wipes data on a node."
   [test node]
   (db/kill! (:db test) test node)
-  (c/su (c/exec :rm :-rf data-dir))
+  (c/su (c/exec :rm :-rf data-dir log-file pid-file))
   :wiped)
 
 (defrecord DB [lazyfs]
