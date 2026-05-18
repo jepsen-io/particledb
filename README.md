@@ -1,14 +1,23 @@
-# jepsen.particledb
+# ParticleDB Jepsen Tests
 
-A Clojure library designed to ... well, that part is up to you.
+This is a work-in-progress test suite for [ParticleDB](https://particledb.ai/) a Postgres-compatible database from Orkes.
 
 ## Usage
 
-FIXME
+You'll need a [Jepsen
+environment](https://github.com/jepsen-io/jepsen?tab=readme-ov-file#setting-up-a-jepsen-environment)
+first. Then you can run, in this directory:
+
+```
+lein run test
+```
+
+Which will install ParticleDB and run a test on your default nodes (`n1`, `n2`,
+`n3`, `n4`, and `n5`). See `lein run test --help` for various options.
 
 ## License
 
-Copyright © 2026 FIXME
+Copyright © 2026 Jepsen, LLC
 
 This program and the accompanying materials are made available under the
 terms of the Eclipse Public License 2.0 which is available at
