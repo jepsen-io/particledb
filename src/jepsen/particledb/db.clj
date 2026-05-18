@@ -41,6 +41,9 @@
   "Install ParticleDB"
   [test]
   (c/su
+    ; ParticleDB logs ANSI color sequences to stdout/stderr, so we have to
+    ; filter those out to get readable logs
+    (debian/install ["ansifilter"])
     (let [url (str "https://pdb-releases-193278869920-us-east-1.s3.us-east-1.amazonaws.com/v" (:version test) "/particledb-linux-x86_64")
           path (cu/cached-wget! url)]
       (c/exec :mkdir :-p dir)
@@ -72,9 +75,12 @@
 
   db/LogFiles
   (log-files [this test node]
+    ; The log file will have ANSI color escapes, so we rewrite it
     (c/su
-      {log-file                 "daemon.log"
-       (cu/tarball! data-dir)   "data.tar.gz"}))
+      (let [plain-file (str log-file ".plain")]
+      (c/exec :ansifilter :-p :-i log-file :-o plain-file)
+      {plain-file               "daemon.log"
+       (cu/tarball! data-dir)   "data.tar.gz"})))
 
   db/Primary
   (primaries [_ test])
