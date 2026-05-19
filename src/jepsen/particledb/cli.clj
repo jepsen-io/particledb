@@ -25,7 +25,7 @@
 
 (def txn-modes
   "The set of txn modes supported by ParticleDB"
-  #{:fast :occ :row-2pl :table-2pl})
+  #{:fast :occ :row-2pl :table-2pl :serializable-ssi})
 
 (def workloads
   "A map of workload names to functions that take CLI options and return
@@ -274,7 +274,10 @@
    (cli/repeated-opt "-n" "--node HOSTNAME" "Node(s) to run test on. Flag may be submitted many times, with one node per flag."
                      ["n1"])
 
-   [nil "--on-conflict" "If set, uses an ON CONFLICT clause to upsert rows."]
+   [nil "--on-conflict" "If set, uses an ON CONFLICT clause to upsert rows."
+    ; We can't use the homebrew insert method because ParticleDB doesn't
+    ; support savepoints; ON CONFLICT it is!
+    :default true]
 
    [nil "--postgres-password PASS" "What password should we use to connect to postgres?"
     :default "jepsenpw"]
@@ -290,11 +293,15 @@
     :parse-fn parse-long]
 
    [nil "--postgres-user NAME" "What username should we use to connect to the Postgres interface?"
-    :default "admin"]
+    ; While you can set a password, there doesn't seem to be any option to
+    ; configure the username! Some docs say particledb, others say admin.
+    ; Neither seems to work! We bypass this for now by passing `--no-auth`, but
+    ; I'm leaving it here in case it works later.
+    :default "particledb"]
 
-   [nil "--prepare-threshold INT" "Passes a prepareThreshold option to the JDBC spec."
-    :parse-fn parse-long]
-
+   [nil "--prepare-threshold INT" "Passes a prepareThreshold option to the JDBC spec. Prepared statements cause the Postgres JDBC driver to explode with NoSuchElementException at java.util.ArrayDeque/removeFirst (ArrayDeque.java:361). It's fine in Postgres; this seems to be a ParticleDB-specific thing. We set this *very* high to work around that."
+    :parse-fn parse-long
+    :default Integer/MAX_VALUE]
 
    ["-r" "--rate HZ" "Approximate request rate, in hz"
     :default  10000
@@ -338,6 +345,7 @@
                     (if (nil? l)
                       [false true]
                       [l]))
+        txn-modes (if-let [t (:txn-mode opts)] [t] (sort txn-modes))
         cfts        (let [cft (:corrupt-file-type opts)]
                       (if (nil? cft)
                         (keys nemesis/file-types)
@@ -348,11 +356,13 @@
           ft    (if (seq (set/intersection file-corruption-nemeses (set n)))
                   cfts
                   [nil])
+          t     txn-modes
           w     workloads]
       (particledb-test (-> opts
                            (assoc :lazyfs             l
                                   :nemesis            n
                                   :corrupt-file-type  ft
+                                  :txn-mode           t
                                   :workload           w))))))
 
 (defn -main

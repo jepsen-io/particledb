@@ -112,8 +112,11 @@
          bin
          :start
          :--data-dir data-dir
-         :--auth-method "password"
-         :--pg-password (:postgres-password test)
+         ; These don't seem to work
+         ;:--auth-method "password"
+         ;:--pg-password (:postgres-password test)
+         ; So let's try turning off auth entirely
+         :--no-auth
          (when-let [m (:wal-sync-mode test)] [:--wal-sync-mode (name m)])
          (when-let [m (:txn-mode test)]      [:--txn-mode      (name m)])))))
 
