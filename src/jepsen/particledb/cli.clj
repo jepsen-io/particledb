@@ -16,7 +16,7 @@
                     [util :as util]]
             [jepsen.particledb [db :as db]
                                [nemesis :as nemesis]]
-            [jepsen.postgres [cli :as pcli]]
+            [jepsen.postgres [cli :as pcli :refer [key-types upsert-types]]]
             [jepsen.os.debian :as debian]))
 
 (def wal-sync-modes
@@ -35,7 +35,8 @@
 
 (def standard-workloads
   "All the workloads we run by default."
-  [:append])
+  [:append
+   :wr])
 
 (def nemeses
   "Basic nemeses we have available."
@@ -90,7 +91,7 @@
   [spec]
   (->> (str/split spec #",")
        (remove #{""})
-       (map keyword)))
+       (mapv keyword)))
 
 (defn parse-nemesis-spec
   "Takes a comma-separated nemesis string and returns a collection of keyword
@@ -243,7 +244,16 @@
     :parse-fn parse-long
     :validate [pos? "Must be a positive integer"]]
 
+   [nil "--key-types TYPES" "Some workloads have multiple ways to select the row for a specific key. TYPES is a comma-separated list of types like primary,secondary, which means we use a mix of primary keys and (un-indexed) secondary keys."
+    :default  (vec key-types)
+    :parse-fn parse-comma-kws
+    :validate [(partial every? key-types) (cli/one-of key-types)]]
+
    [nil "--[no-]lazyfs" "Mounts data dir in a lazy filesystem that can lose writes on kill."]
+
+   [nil "--[no-]linearizable-keys" "If set, assumes keys are linearizable for the wr workload."
+    :id :linearizable-keys?
+    :default false]
 
    [nil "--log-sql" "Logs SQL queries"]
 
@@ -256,6 +266,11 @@
     :default  256
     :parse-fn parse-long
     :validate [pos? "Must be a positive integer."]]
+
+   [nil "--mop-delay MS" "Maximum delay of a transactional micro-operation, in milliseconds. Delays are Zipfian, so mostly very small, but occasionally large."
+    :default 100
+    :parse-fn parse-long
+    :validate [(complement neg?) "Must not be negative"]]
 
    [nil "--nemesis FAULTS" "A comma-separated list of nemesis faults to enable"
     :default  #{}
@@ -275,11 +290,6 @@
 
    (cli/repeated-opt "-n" "--node HOSTNAME" "Node(s) to run test on. Flag may be submitted many times, with one node per flag."
                      ["n1"])
-
-   [nil "--on-conflict" "If set, uses an ON CONFLICT clause to upsert rows."
-    ; We can't use the homebrew insert method because ParticleDB doesn't
-    ; support savepoints; ON CONFLICT it is!
-    :default true]
 
    [nil "--postgres-password PASS" "What password should we use to connect to postgres?"
     :default "jepsenpw"]
@@ -310,20 +320,28 @@
     :parse-fn read-string
     :validate [pos? "Must be a positive number."]]
 
+   ; Right now ParticleDB doesn't support savepoints.
+   [nil "--[no-]savepoints" "Does this database support savepoints?"
+    :default false]
+
+   [nil "--[no-]sequential-keys" "If set, assumes keys are sequentially consistent for the wr workload."
+    :id :sequential-keys?
+    :default false]
+
    [nil "--time-limit SECONDS"
     "Excluding setup and teardown, how long should a test run for, in seconds?"
     :default  300
     :parse-fn #(Long/parseLong %)
     :validate [pos? "Must be positive"]]
 
-   [nil "--timeout MILLIS" "Client timeout, in milliseconds"
-    :default  5000
-    :parse-fn parse-long
-    :validate [pos? "Must be positive."]]
-
    [nil "--txn-mode MODE" "The ParticleDB transaction mode."
     :parse-fn keyword
     :validate [txn-modes (cli/one-of txn-modes)]]
+
+   [nil "--upsert-types TACTICS" "A comma-separated list of upsert tactics. For example, update,on-conflict."
+    :default (vec upsert-types)
+    :parse-fn parse-comma-kws
+    :validate [(partial every? upsert-types) (cli/one-of upsert-types)]]
 
    ["-v" "--version VERSION" "What version should we test?"
     :default "1.1.4"]
@@ -331,6 +349,10 @@
    [nil "--wal-sync-mode MODE" "The WAL sync mode for ParticleDB"
     :parse-fn keyword
     :validate [txn-modes (cli/one-of txn-modes)]]
+
+   [nil "--[no-]wfr-keys" "If set, assumes keys obey writes-follow-reads within a single transaction, for the wr workload. This is almost *certainly* a safe assumption."
+    :id :wfr-keys?
+    :default true]
 
    ["-w" "--workload NAME" "What workload should we run?"
     :default  :append
