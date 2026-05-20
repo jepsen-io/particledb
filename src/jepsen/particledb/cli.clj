@@ -25,7 +25,7 @@
 
 (def txn-modes
   "The set of txn modes supported by ParticleDB"
-  #{:fast :occ :row-2pl :table-2pl :serializable-ssi})
+  #{:fast :occ-v3 :zero-copy-occ, :serializable-ssi, :table-2pl})
 
 (def workloads
   "A map of workload names to functions that take CLI options and return
@@ -244,6 +244,8 @@
     :validate [pos? "Must be a positive integer"]]
 
    [nil "--[no-]lazyfs" "Mounts data dir in a lazy filesystem that can lose writes on kill."]
+
+   [nil "--log-sql" "Logs SQL queries"]
 
    [nil "--max-txn-length NUM" "Maximum number of operations in a transaction."
     :default  4
