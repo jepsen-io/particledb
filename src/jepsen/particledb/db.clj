@@ -1,6 +1,7 @@
 (ns jepsen.particledb.db
   "Database setup and teardown."
   (:require [clojure [string :as str]]
+            [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
             [jepsen [control :as c :refer [|]]
                     [core :as jepsen]
@@ -44,10 +45,15 @@
     ; ParticleDB logs ANSI color sequences to stdout/stderr, so we have to
     ; filter those out to get readable logs
     (debian/install ["ansifilter"])
-    (let [url (str "https://pdb-releases-193278869920-us-east-1.s3.us-east-1.amazonaws.com/v" (:version test) "/particledb-linux-x86_64")
-          path (cu/cached-wget! url)]
-      (c/exec :mkdir :-p dir)
-      (c/exec :cp path bin)
+    (c/exec :mkdir :-p dir)
+    (let [version (:version test)]
+      (if (.exists (io/file version))
+        ; Upload local binary
+        (do (info "Uploading local version" version)
+            (c/upload version bin))
+        (let [url (str "https://pdb-releases-193278869920-us-east-1.s3.us-east-1.amazonaws.com/v" (:version test) "/particledb-linux-x86_64")
+              path (cu/cached-wget! url)]
+          (c/exec :cp path bin)))
       (c/exec :chmod :+x bin))))
 
 (defn wipe!

@@ -104,7 +104,7 @@
 (defn test-name
   "Takes CLI options and constructs a test name as a string."
   [opts]
-  (str (:version opts) " "
+  (str (str/replace (:version opts) "/" "-") " "
        (name (:workload opts))
        (when-let [m (:wal-sync-mode opts)]
          (str " wal=" (name m)))
@@ -343,7 +343,7 @@
     :parse-fn parse-comma-kws
     :validate [(partial every? upsert-types) (cli/one-of upsert-types)]]
 
-   ["-v" "--version VERSION" "What version should we test?"
+   ["-v" "--version VERSION" "What version should we test? Can either be a version string like '1.1.4' or a path to a local binary on the control node."
     :default "1.1.4"]
 
    [nil "--wal-sync-mode MODE" "The WAL sync mode for ParticleDB"
