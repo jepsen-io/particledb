@@ -35,7 +35,7 @@
 
 (def standard-workloads
   "All the workloads we run by default."
-  [:append :ledger])
+  [:append])
 
 (def nemeses
   "Basic nemeses we have available."
