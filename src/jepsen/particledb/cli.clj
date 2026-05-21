@@ -15,8 +15,8 @@
                     [tests :as tests]
                     [util :as util]]
             [jepsen.particledb [db :as db]
-                               [nemesis :as nemesis]]
-            [jepsen.particledb.workload [internal :as internal]]
+                               [nemesis :as nemesis]
+                               [pdb-client :as pdb-client]]
             [jepsen.postgres [cli :as pcli :refer [key-types upsert-types]]]
             [jepsen.os.debian :as debian]))
 
@@ -31,15 +31,20 @@
 (def workloads
   "A map of workload names to functions that take CLI options and return
   workload maps"
-  (merge pcli/workloads
-         {:none (constantly tests/noop-test)
-          :internal internal/workload}))
+  (merge (update-keys pcli/workloads
+                      (fn [k]
+                        (keyword (str (name k) "-pg"))))
+         pdb-client/workloads
+         {:none (constantly tests/noop-test)}))
 
 (def standard-workloads
   "All the workloads we run by default."
-  [:append
-   :wr
-   :internal])
+  [:append-pg
+   :append-pdb
+   :rw-pg
+   :rw-pdb
+   :internal-pg
+   :internal-pdb])
 
 (def nemeses
   "Basic nemeses we have available."

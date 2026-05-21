@@ -11,7 +11,6 @@
             [jepsen.control [net :as cn]
                             [util :as cu]]
             [jepsen.os.debian :as debian]
-            [jepsen.particledb [client :as client]]
             [clj-commons.slingshot :refer [try+ throw+]]))
 
 (def dir

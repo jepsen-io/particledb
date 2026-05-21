@@ -6,6 +6,7 @@
   :dependencies [[org.clojure/clojure "1.12.5"]
                  [jepsen "0.3.12-SNAPSHOT"
                   :exclusions [com.fasterxml.jackson.core/jackson-core]]
+                 [io.jepsen/sql "0.1.0-SNAPSHOT"]
                  [io.jepsen/postgres "0.1.2-SNAPSHOT"
                   :exclusions [jepsen]]
                  [ai.particledb/particledb-jdbc "1.0.0"
