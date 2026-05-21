@@ -16,6 +16,7 @@
                     [util :as util]]
             [jepsen.particledb [db :as db]
                                [nemesis :as nemesis]]
+            [jepsen.particledb.workload [internal :as internal]]
             [jepsen.postgres [cli :as pcli :refer [key-types upsert-types]]]
             [jepsen.os.debian :as debian]))
 
@@ -31,12 +32,14 @@
   "A map of workload names to functions that take CLI options and return
   workload maps"
   (merge pcli/workloads
-         {:none (constantly tests/noop-test)}))
+         {:none (constantly tests/noop-test)
+          :internal internal/workload}))
 
 (def standard-workloads
   "All the workloads we run by default."
   [:append
-   :wr])
+   :wr
+   :internal])
 
 (def nemeses
   "Basic nemeses we have available."

@@ -7,8 +7,23 @@
                  [jepsen "0.3.12-SNAPSHOT"
                   :exclusions [com.fasterxml.jackson.core/jackson-core]]
                  [io.jepsen/postgres "0.1.2-SNAPSHOT"
-                  :exclusions [jepsen]]]
+                  :exclusions [jepsen]]
+                 [ai.particledb/particledb-jdbc "1.0.0"
+                  :exclusions [org.slf4j/slf4j-api]]
+                 ; The particledb jdbc driver literally cannot execute a SELECT
+                 ; unless you manually pull in Apache Arrow. What is going ON
+                 ; here???
+                 [org.apache.arrow/arrow-vector "15.0.2"
+                  :exclusions [org.slf4j/slf4j-api
+                               com.fasterxml.jackson.core/jackson-core
+                               com.fasterxml.jackson.core/jackson-databind
+                               com.fasterxml.jackson.core/jackson-annotations]]
+                 [org.apache.arrow/arrow-memory-netty "15.0.2"
+                  :exclusions [org.slf4j/slf4j-api]]]
   :repl-options {:init-ns jepsen.particledb.repl}
   :main jepsen.particledb.cli
   :jvm-opts ["-Djava.awt.headless=true"
-             "-server"])
+             "-server"
+             ; OK, sure, why not
+             "--add-opens=java.base/java.nio=ALL-UNNAMED"
+             "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"])
