@@ -23,8 +23,12 @@
                   :exclusions [org.slf4j/slf4j-api]]]
   :repl-options {:init-ns jepsen.particledb.repl}
   :main jepsen.particledb.cli
+  :aot jepsen.particledb.cli
   :jvm-opts ["-Djava.awt.headless=true"
+             ; ParticleDB doesn't bind to v6 addresses, I think
+             "-Djava.net.preferIPv4Stack=true"
              "-server"
              ; OK, sure, why not
              "--add-opens=java.base/java.nio=ALL-UNNAMED"
-             "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"])
+             "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"]
+  :profiles {:uberjar {:aot :all}})
