@@ -296,9 +296,6 @@
     :parse-fn parse-long
     :validate [pos? "Must be a positive number."]]
 
-   (cli/repeated-opt "-n" "--node HOSTNAME" "Node(s) to run test on. Flag may be submitted many times, with one node per flag."
-                     ["n1"])
-
    [nil "--postgres-password PASS" "What password should we use to connect to postgres?"
     :default "jepsenpw"]
 
