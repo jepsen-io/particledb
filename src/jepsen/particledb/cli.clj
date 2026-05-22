@@ -18,6 +18,7 @@
             [jepsen.particledb [db :as db]
                                [nemesis :as nemesis]
                                [pdb-client :as pdb-client]]
+            [jepsen.particledb.workload [internal-psql :as internal-psql]]
             [jepsen.postgres [cli :as pcli]]
             [jepsen.os.debian :as debian]))
 
@@ -38,7 +39,8 @@
                         (keyword (str (name k) "-pg"))))
          ; And these use the ParticleDB SDK
          pdb-client/workloads
-         {:none (constantly tests/noop-test)}))
+         {:none (constantly tests/noop-test)
+          :internal-psql internal-psql/workload}))
 
 (def standard-workloads
   "All the workloads we run by default."
@@ -46,6 +48,7 @@
    :append-pdb
    :internal-pg
    :internal-pdb
+   :internal-psql
    :rw-pg
    :rw-pdb])
 
