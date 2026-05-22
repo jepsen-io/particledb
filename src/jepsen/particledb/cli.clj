@@ -12,12 +12,13 @@
                     [generator :as gen]
                     [nemesis :as jepsen.nemesis]
                     [os :as os]
+                    [sql :as sql]
                     [tests :as tests]
                     [util :as util]]
             [jepsen.particledb [db :as db]
                                [nemesis :as nemesis]
                                [pdb-client :as pdb-client]]
-            [jepsen.postgres [cli :as pcli :refer [key-types upsert-types]]]
+            [jepsen.postgres [cli :as pcli]]
             [jepsen.os.debian :as debian]))
 
 (def wal-sync-modes
@@ -31,9 +32,11 @@
 (def workloads
   "A map of workload names to functions that take CLI options and return
   workload maps"
-  (merge (update-keys pcli/workloads
+  (merge ; These workloads are directly from Postgres
+         (update-keys pcli/workloads
                       (fn [k]
                         (keyword (str (name k) "-pg"))))
+         ; And these use the ParticleDB SDK
          pdb-client/workloads
          {:none (constantly tests/noop-test)}))
 
@@ -41,10 +44,10 @@
   "All the workloads we run by default."
   [:append-pg
    :append-pdb
-   :rw-pg
-   :rw-pdb
    :internal-pg
-   :internal-pdb])
+   :internal-pdb
+   :rw-pg
+   :rw-pdb])
 
 (def nemeses
   "Basic nemeses we have available."
@@ -208,162 +211,111 @@
 
 (def cli-opts
   "Command-line option specification"
-  [[nil "--antithesis" "Forces Antithesis mode. Useful for debugging in local docker."]
+  (cli/merge-opt-specs
+    sql/cli-opts
+    [[nil "--antithesis" "Forces Antithesis mode. Useful for debugging in local docker."]
 
-   [nil "--concurrency NUMBER" "How many workers should we run? Must be an integer, optionally followed by n (e.g. 3n) to multiply by the number of nodes."
-    :default  "3n"
-    :validate [(partial re-find #"^\d+n?$")
-               "Must be an integer, optionally followed by n."]]
+     [nil "--concurrency NUMBER" "How many workers should we run? Must be an integer, optionally followed by n (e.g. 3n) to multiply by the number of nodes."
+      :default  "3n"
+      :validate [(partial re-find #"^\d+n?$")
+                 "Must be an integer, optionally followed by n."]]
 
-   [nil "--db-node-targets TARGETS" "A comma-separated list of ways to target DB nodes for faults, like 'one,majority'"
-    :default  [:one :majority :all]
-    :parse-fn parse-comma-kws
-    :validate [(partial every? db-node-targets) (cli/one-of db-node-targets)]]
+     [nil "--db-node-targets TARGETS" "A comma-separated list of ways to target DB nodes for faults, like 'one,majority'"
+      :default  [:one :majority :all]
+      :parse-fn parse-comma-kws
+      :validate [(partial every? db-node-targets) (cli/one-of db-node-targets)]]
 
-   [nil "--corrupt-file-type TYPE" "What kind of files to corrupt. See nemesis/file-types."
-    :parse-fn keyword
-    :validate [nemesis/file-types (cli/one-of nemesis/file-types)]]
+     [nil "--corrupt-file-type TYPE" "What kind of files to corrupt. See nemesis/file-types."
+      :parse-fn keyword
+      :validate [nemesis/file-types (cli/one-of nemesis/file-types)]]
 
-    [nil "--expected-consistency-model MODEL" "What level of isolation do we *expect* to observe? Defaults to strong-serializable."
-    :default :strong-serializable
-    :parse-fn keyword]
+     [nil "--expected-consistency-model MODEL" "What level of isolation do we *expect* to observe? Defaults to strong-serializable."
+      :default :strong-serializable
+      :parse-fn keyword]
 
-   [nil "--final-time-limit SECONDS" "How long should we run the final generator for, at most? In seconds."
-    :default  300
-    :parse-fn read-string
-    :validate [#(and (number? %) (pos? %)) "must be a positive number"]]
+     [nil "--final-time-limit SECONDS" "How long should we run the final generator for, at most? In seconds."
+      :default  300
+      :parse-fn read-string
+      :validate [#(and (number? %) (pos? %)) "must be a positive number"]]
 
-   [nil "--initial-quiet-period SECONDS" "How long to wait before beginning faults"
-    :default  10
-    :parse-fn read-string
-    :validate [#(and (number? %) (pos? %)) "must be a positive number"]]
+     [nil "--initial-quiet-period SECONDS" "How long to wait before beginning faults"
+      :default  10
+      :parse-fn read-string
+      :validate [#(and (number? %) (pos? %)) "must be a positive number"]]
 
-    ["-i" "--isolation LEVEL" "What level of isolation we should set: serializable, repeatable-read, etc."
-    :default :serializable
-    :parse-fn keyword
-    :validate [#{:read-uncommitted
-                 :read-committed
-                 :repeatable-read
-                 :serializable}
-               "Should be one of read-uncommitted, read-committed, repeatable-read, or serializable"]]
+     [nil "--[no-]lazyfs" "Mounts data dir in a lazy filesystem that can lose writes on kill."]
 
-   [nil "--key-count NUM" "Number of keys in active rotation."
-    :default  10
-    :parse-fn parse-long
-    :validate [pos? "Must be a positive integer"]]
+     [nil "--nemesis FAULTS" "A comma-separated list of nemesis faults to enable"
+      :default  #{}
+      :parse-fn parse-nemesis-spec
+      :validate [(partial every? (into nemeses (keys special-nemeses)))
+                 (str (cli/one-of nemeses) " or the special nemeses, which " (cli/one-of special-nemeses))]]
 
-   [nil "--key-types TYPES" "Some workloads have multiple ways to select the row for a specific key. TYPES is a comma-separated list of types like primary,secondary, which means we use a mix of primary keys and (un-indexed) secondary keys."
-    :default  (vec key-types)
-    :parse-fn parse-comma-kws
-    :validate [(partial every? key-types) (cli/one-of key-types)]]
+     [nil "--nemesis-interval SECS" "Roughly how long between nemesis operations."
+      :default  5
+      :parse-fn read-string
+      :validate [pos? "Must be a positive number."]]
 
-   [nil "--[no-]lazyfs" "Mounts data dir in a lazy filesystem that can lose writes on kill."]
+     [nil "--nemesis-stable-period SECS" "If given, rotates the mixture of nemesis faults over time with roughly this period."
+      :default  30
+      :parse-fn parse-long
+      :validate [pos? "Must be a positive number."]]
 
-   [nil "--[no-]linearizable-keys" "If set, assumes keys are linearizable for the wr workload."
-    :id :linearizable-keys?
-    :default false]
+     [nil "--postgres-password PASS" "What password should we use to connect to postgres?"
+      :default "jepsenpw"]
 
-   [nil "--log-sql" "Logs SQL queries"]
+     [nil "--postgres-sslmode MODE" "What sslmode should we use to connect to the postgres interface? Should be either require or disable."
+      :default "disable"
+      :parse-fn str
+      :validate [#{"require" "disable"}
+                 "Should be one of require, or disable"]]
 
-   [nil "--max-txn-length NUM" "Maximum number of operations in a transaction."
-    :default  4
-    :parse-fn parse-long
-    :validate [pos? "Must be a positive integer"]]
+     [nil "--postgres-port NUMBER" "What port should we connect to when talking to the postgres interface?"
+      :default 5432
+      :parse-fn parse-long]
 
-   [nil "--max-writes-per-key NUM" "Maximum number of writes to any given key."
-    :default  256
-    :parse-fn parse-long
-    :validate [pos? "Must be a positive integer."]]
+     [nil "--postgres-user NAME" "What username should we use to connect to the Postgres interface?"
+      ; While you can set a password, there doesn't seem to be any option to
+      ; configure the username! Some docs say particledb, others say admin.
+      ; Neither seems to work! We bypass this for now by passing `--no-auth`, but
+      ; I'm leaving it here in case it works later.
+      :default "particledb"]
 
-   [nil "--mop-delay MS" "Maximum delay of a transactional micro-operation, in milliseconds. Delays are Zipfian, so mostly very small, but occasionally large."
-    :default 100
-    :parse-fn parse-long
-    :validate [(complement neg?) "Must not be negative"]]
+     [nil "--prepare-threshold INT" "Passes a prepareThreshold option to the JDBC spec. Prepared statements cause the Postgres JDBC driver to explode with NoSuchElementException at java.util.ArrayDeque/removeFirst (ArrayDeque.java:361). It's fine in Postgres; this seems to be a ParticleDB-specific thing. We set this *very* high to work around that."
+      :parse-fn parse-long
+      :default Integer/MAX_VALUE]
 
-   [nil "--nemesis FAULTS" "A comma-separated list of nemesis faults to enable"
-    :default  #{}
-    :parse-fn parse-nemesis-spec
-    :validate [(partial every? (into nemeses (keys special-nemeses)))
-               (str (cli/one-of nemeses) " or the special nemeses, which " (cli/one-of special-nemeses))]]
+     ["-r" "--rate HZ" "Approximate request rate, in hz"
+      :default  10000
+      :parse-fn read-string
+      :validate [pos? "Must be a positive number."]]
 
-   [nil "--nemesis-interval SECS" "Roughly how long between nemesis operations."
-    :default  5
-    :parse-fn read-string
-    :validate [pos? "Must be a positive number."]]
+     ; Right now ParticleDB doesn't support savepoints.
+     [nil "--[no-]savepoints" "Does this database support savepoints?"
+      :default false]
 
-   [nil "--nemesis-stable-period SECS" "If given, rotates the mixture of nemesis faults over time with roughly this period."
-    :default  30
-    :parse-fn parse-long
-    :validate [pos? "Must be a positive number."]]
+     [nil "--time-limit SECONDS"
+      "Excluding setup and teardown, how long should a test run for, in seconds?"
+      :default  300
+      :parse-fn #(Long/parseLong %)
+      :validate [pos? "Must be positive"]]
 
-   [nil "--postgres-password PASS" "What password should we use to connect to postgres?"
-    :default "jepsenpw"]
+     [nil "--txn-mode MODE" "The ParticleDB transaction mode."
+      :parse-fn keyword
+      :validate [txn-modes (cli/one-of txn-modes)]]
 
-   [nil "--postgres-sslmode MODE" "What sslmode should we use to connect to the postgres interface? Should be either require or disable."
-    :default "disable"
-    :parse-fn str
-    :validate [#{"require" "disable"}
-               "Should be one of require, or disable"]]
+     ["-v" "--version VERSION" "What version should we test? Can either be a version string like '1.1.4' or a path to a local binary on the control node."
+      :default "1.1.4"]
 
-   [nil "--postgres-port NUMBER" "What port should we connect to when talking to the postgres interface?"
-    :default 5432
-    :parse-fn parse-long]
+     [nil "--wal-sync-mode MODE" "The WAL sync mode for ParticleDB"
+      :parse-fn keyword
+      :validate [txn-modes (cli/one-of txn-modes)]]
 
-   [nil "--postgres-user NAME" "What username should we use to connect to the Postgres interface?"
-    ; While you can set a password, there doesn't seem to be any option to
-    ; configure the username! Some docs say particledb, others say admin.
-    ; Neither seems to work! We bypass this for now by passing `--no-auth`, but
-    ; I'm leaving it here in case it works later.
-    :default "particledb"]
-
-   [nil "--prepare-threshold INT" "Passes a prepareThreshold option to the JDBC spec. Prepared statements cause the Postgres JDBC driver to explode with NoSuchElementException at java.util.ArrayDeque/removeFirst (ArrayDeque.java:361). It's fine in Postgres; this seems to be a ParticleDB-specific thing. We set this *very* high to work around that."
-    :parse-fn parse-long
-    :default Integer/MAX_VALUE]
-
-   ["-r" "--rate HZ" "Approximate request rate, in hz"
-    :default  10000
-    :parse-fn read-string
-    :validate [pos? "Must be a positive number."]]
-
-   ; Right now ParticleDB doesn't support savepoints.
-   [nil "--[no-]savepoints" "Does this database support savepoints?"
-    :default false]
-
-   [nil "--[no-]sequential-keys" "If set, assumes keys are sequentially consistent for the wr workload."
-    :id :sequential-keys?
-    :default false]
-
-   [nil "--time-limit SECONDS"
-    "Excluding setup and teardown, how long should a test run for, in seconds?"
-    :default  300
-    :parse-fn #(Long/parseLong %)
-    :validate [pos? "Must be positive"]]
-
-   [nil "--txn-mode MODE" "The ParticleDB transaction mode."
-    :parse-fn keyword
-    :validate [txn-modes (cli/one-of txn-modes)]]
-
-   [nil "--upsert-types TACTICS" "A comma-separated list of upsert tactics. For example, update,on-conflict."
-    :default (vec upsert-types)
-    :parse-fn parse-comma-kws
-    :validate [(partial every? upsert-types) (cli/one-of upsert-types)]]
-
-   ["-v" "--version VERSION" "What version should we test? Can either be a version string like '1.1.4' or a path to a local binary on the control node."
-    :default "1.1.4"]
-
-   [nil "--wal-sync-mode MODE" "The WAL sync mode for ParticleDB"
-    :parse-fn keyword
-    :validate [txn-modes (cli/one-of txn-modes)]]
-
-   [nil "--[no-]wfr-keys" "If set, assumes keys obey writes-follow-reads within a single transaction, for the wr workload. This is almost *certainly* a safe assumption."
-    :id :wfr-keys?
-    :default true]
-
-   ["-w" "--workload NAME" "What workload should we run?"
-    :default  :append
-    :parse-fn keyword
-    :validate [workloads (cli/one-of workloads)]]
-   ])
+     ["-w" "--workload NAME" "What workload should we run?"
+      :default  :append
+      :parse-fn keyword
+      :validate [workloads (cli/one-of workloads)]]
+     ]))
 
 (defn all-tests
   "Turns CLI options into a sequence of tests."
