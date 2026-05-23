@@ -1,15 +1,15 @@
 (ns jepsen.particledb.pdb-client
   "This namespace provides workloads that use the official ParticleDB SDK
   client."
-    (:require [clojure [pprint :refer [pprint]]]
-              [clojure.tools.logging :refer [info warn]]
-              [clj-commons.slingshot :refer [throw+]]
-              [dom-top.core :refer [loopr]]
-              [jepsen [sql :as sql]]
-              [next.jdbc :as j]
-              [next.jdbc.result-set :as rs])
-    (:import (java.sql SQLException)
-             (org.particledb Driver)))
+  (:require [clojure [pprint :refer [pprint]]]
+            [clojure.tools.logging :refer [info warn]]
+            [clj-commons.slingshot :refer [throw+]]
+            [dom-top.core :refer [loopr]]
+            [jepsen [sql :as sql]]
+            [next.jdbc :as j]
+            [next.jdbc.result-set :as rs])
+  (:import (java.sql SQLException)
+           (org.particledb Driver)))
 
 (def port 5440)
 
