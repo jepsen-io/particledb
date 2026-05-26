@@ -552,15 +552,16 @@
    :unique?      false
    :primary-key? true}"
   [name]
-  (g/let [type         gen-column-types
-          not-null?    (g/boolean)
-          unique?      (g/boolean)
-          primary-key? (g/boolean)]
-    (cond-> {:name name
-             :type type}
-      not-null?    (assoc :not-null? true)
-      unique?      (assoc :unique? true)
-      primary-key? (assoc :primary-key? true))))
+  (hc/with-span
+    (g/let [type         gen-column-types
+            not-null?    (g/boolean)
+            unique?      (g/boolean)
+            primary-key? (g/boolean)]
+      (cond-> {:name name
+               :type type}
+        not-null?    (assoc :not-null? true)
+        unique?      (assoc :unique? true)
+        primary-key? (assoc :primary-key? true)))))
 
 (defn column-schema->sql
   "Turns a column schema into the SQL to create it."
@@ -582,10 +583,11 @@
              (g/collect [[cols i pk?] [[] 0 false]
                          {:min-size 1, :max-size 4}]
                         (let [col (gen-column-schema (column-names i))]
-                          (if (and pk? (:primary-key? col))
-                            ; ParticleDB is happy to let us do several primary
-                            ; keys, but that's basically ALL the errors. When
-                            ; they're more robust, come back and try this again.
+                          (if (and pk? (:primary-key? col)
+                                   ; ParticleDB is happy to let us do several primary
+                                   ; keys, but we don't want to stop there, so we
+                                   ; make these errors relatively rare.
+                                   (< 0.01 (hc/gen (g/float 0 1))))
                             :hegel-clj/reject
                             [(conj cols col)
                              (inc i)
@@ -775,7 +777,7 @@
 (defn condense-sql
   "Condenses a single SQL statement; see condense-case."
   [sql-str]
-  (str/replace sql-str #" ([tuv])_\d+ " " $1 "))
+  (str/replace sql-str #" ([tuv])_\d+[ ;\,]" " $1 "))
 
 (defn condense-op
   "Rewrites an operation so that it is easier to understand and explore
@@ -790,7 +792,7 @@
   [test dir {:keys [value] :as op}]
   (let [{:keys [id origin sql]} value]
     (store/with-out-file test (str dir "/" (when origin (str origin " "))
-                                   "/" origin
+                                   "/" origin " "
                                    id ".txt")
       ; First, step-by-step with results.
       (doseq [{:keys [sql pg pdb] :as mop} sql]
@@ -807,7 +809,7 @@
 
       ; Then condensed case
       (println)
-      (println "# Condensed case (for reproducing)")
+      (println "# Condensed case")
       (println)
       (doseq [{:keys [sql]} (:sql (:value (condense-op op)))]
         (print sql)
@@ -868,7 +870,7 @@
   (let [last-id (atom -1)
         queue   (atom PersistentQueue/EMPTY)
         hegel-worker (hegel-worker
-                       {:test-cases 100
+                       {:test-cases 10000
                         :seed (rand/long)}
                        last-id
                        queue)]
