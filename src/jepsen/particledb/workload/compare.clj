@@ -868,7 +868,8 @@
   (let [last-id (atom -1)
         queue   (atom PersistentQueue/EMPTY)
         hegel-worker (hegel-worker
-                       {:test-cases 100}
+                       {:test-cases 100
+                        :seed (rand/long)}
                        last-id
                        queue)]
     {:client    (Client. nil nil)

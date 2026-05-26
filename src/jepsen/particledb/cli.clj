@@ -12,6 +12,7 @@
                     [generator :as gen]
                     [nemesis :as jepsen.nemesis]
                     [os :as os]
+                    [random :as rand]
                     [sql :as sql]
                     [tests :as tests]
                     [util :as util]]
@@ -138,7 +139,8 @@
 (defn particledb-test
   "Takes CLI options and constructs a Jepsen test map"
   [opts]
-  (let [workload-name   (:workload opts)
+  (let [_               (rand/set-seed! (:seed opts (rand/long)))
+        workload-name   (:workload opts)
         workload        ((workloads workload-name) opts)
         db              (db/joint-db opts)
         os              debian/os
@@ -308,6 +310,9 @@
      ; Right now ParticleDB doesn't support savepoints.
      [nil "--[no-]savepoints" "Does this database support savepoints?"
       :default false]
+
+     [nil "--seed INTEGER" "A seed for the random number generator. Useful for reproducing `compare` runs."
+     :parse-fn parse-long]
 
      [nil "--time-limit SECONDS"
       "Excluding setup and teardown, how long should a test run for, in seconds?"
