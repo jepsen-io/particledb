@@ -126,7 +126,7 @@
                    #"out of range"
                    "out of range"
 
-                   nil)
+                   "unknown")
 
                  ; PDB threw an error
                  (and (map? pdb) (:msg pdb))
@@ -156,7 +156,7 @@
                    #"duplicate key value"
                    "duplicate key value"
 
-                   nil)
+                   "unknown")
 
                  ; We got results, but... they differed
                  (and (vector? pg) (vector? pdb))
@@ -180,7 +180,7 @@
 
                  ; Not sure what this is
                  true
-                 nil)))))
+                 "unknown")))))
 
 ; Our client is fairly simple: it takes a vector of SQL strings, runs them on
 ; both clients, and returns vectors of their results.
@@ -772,12 +772,27 @@
       (str/replace "\n" (str "\n" indent))
       (str/replace #"[\n\s]*$" "")))
 
+(defn condense-sql
+  "Condenses a single SQL statement; see condense-case."
+  [sql-str]
+  (str/replace sql-str #" ([tuv])_\d+ " " $1 "))
+
+(defn condense-op
+  "Rewrites an operation so that it is easier to understand and explore
+  interactively. Rewrites table names (e.g. 't_123') as simply 't'."
+  [op]
+  (update-in op [:value :sql]
+             (fn [sql]
+               (mapv #(update % :sql condense-sql) sql))))
+
 (defn write-case!
   "Writes a test case op to a file."
   [test dir {:keys [value] :as op}]
   (let [{:keys [id origin sql]} value]
     (store/with-out-file test (str dir "/" (when origin (str origin " "))
+                                   "/" origin
                                    id ".txt")
+      ; First, step-by-step with results.
       (doseq [{:keys [sql pg pdb] :as mop} sql]
         (print sql)
         (println ";")
@@ -788,7 +803,15 @@
               (println (indented-pprint-str "    " pdb))
               (println "  Postgres:")
               (println (indented-pprint-str "    " pg))
-              (println)))))))
+              (println))))
+
+      ; Then condensed case
+      (println)
+      (println "# Condensed case (for reproducing)")
+      (println)
+      (doseq [{:keys [sql]} (:sql (:value (condense-op op)))]
+        (print sql)
+        (println ";")))))
 
 (defrecord Checker []
   checker/Checker
@@ -832,7 +855,7 @@
                                   ; And wait for Jepsen to evaluate it.
                                   @result))]
           (info "Hegel complete:" (with-out-str (pprint res)))
-          (if (every? :origin (:final res))
+          (if false ;(every? #(not= "unknown" (:origin %)) (:final res))
             (do (info "Trying again to see if we can find new bugs")
                 (recur))
             ; Done
