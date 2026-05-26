@@ -18,7 +18,8 @@
             [jepsen.particledb [db :as db]
                                [nemesis :as nemesis]
                                [pdb-client :as pdb-client]]
-            [jepsen.particledb.workload [internal-psql :as internal-psql]]
+            [jepsen.particledb.workload [compare :as compare]
+                                        [internal-psql :as internal-psql]]
             [jepsen.postgres [cli :as pcli]]
             [jepsen.os.debian :as debian]))
 
@@ -39,13 +40,15 @@
                         (keyword (str (name k) "-pg"))))
          ; And these use the ParticleDB SDK
          pdb-client/workloads
-         {:none (constantly tests/noop-test)
+         {:none          (constantly tests/noop-test)
+          :compare       compare/workload
           :internal-psql internal-psql/workload}))
 
 (def standard-workloads
   "All the workloads we run by default."
   [:append-pg
    :append-pdb
+   :compare
    :internal-pg
    :internal-pdb
    :internal-psql
@@ -137,7 +140,7 @@
   [opts]
   (let [workload-name   (:workload opts)
         workload        ((workloads workload-name) opts)
-        db              (db/db opts)
+        db              (db/joint-db opts)
         os              debian/os
         nemesis         (nemesis/package
                           {:db            db
@@ -185,6 +188,11 @@
         ; And wrap
         gen (if-let [wrap (:wrap-generator workload)]
               (wrap gen)
+              gen)
+        ; The compare test bypasses all that; no faults, we just let hegel
+        ; drive.
+        gen (if (#{:compare} workload-name)
+              workload-gen
               gen)]
     (-> tests/noop-test
         (merge
@@ -227,6 +235,10 @@
       :default  [:one :majority :all]
       :parse-fn parse-comma-kws
       :validate [(partial every? db-node-targets) (cli/one-of db-node-targets)]]
+
+     [nil "--compare-origin PATTERN" "Takes a pattern matching origin strings in the compare workload, like 'different (data|columns)'. Hunts for that kind of bug and ignores all others, except those of unknown origin."
+      :parse-fn re-pattern
+      :default #""]
 
      [nil "--corrupt-file-type TYPE" "What kind of files to corrupt. See nemesis/file-types."
       :parse-fn keyword
@@ -274,7 +286,7 @@
                  "Should be one of require, or disable"]]
 
      [nil "--postgres-port NUMBER" "What port should we connect to when talking to the postgres interface?"
-      :default 5432
+      :default 15432
       :parse-fn parse-long]
 
      [nil "--postgres-user NAME" "What username should we use to connect to the Postgres interface?"

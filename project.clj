@@ -11,6 +11,7 @@
                   :exclusions [jepsen]]
                  [ai.particledb/particledb-jdbc "1.0.0"
                   :exclusions [org.slf4j/slf4j-api]]
+                 [com.aphyr/hegel-clj "0.1.0-SNAPSHOT"]
                  ; The particledb jdbc driver literally cannot execute a SELECT
                  ; unless you manually pull in Apache Arrow. What is going ON
                  ; here???

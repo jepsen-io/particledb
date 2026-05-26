@@ -6,11 +6,14 @@
             [jepsen [control :as c :refer [|]]
                     [core :as jepsen]
                     [db :as db]
+                    [generator :as gen]
                     [lazyfs :as lazyfs]
                     [util :as util :refer [await-fn meh]]]
             [jepsen.control [net :as cn]
                             [util :as cu]]
             [jepsen.os.debian :as debian]
+            [jepsen.particledb.pdb-client :as pdbc]
+            [jepsen.postgres.db :as pg]
             [clj-commons.slingshot :refer [try+ throw+]]))
 
 (def dir
@@ -117,15 +120,61 @@
          bin
          :start
          :--data-dir data-dir
+         :--pg-addr (str "0.0.0.0:" (:postgres-port test))
          ; These don't seem to work
          ;:--auth-method "password"
          ;:--pg-password (:postgres-password test)
          ; So let's try turning off auth entirely
          :--no-auth
          (when-let [m (:wal-sync-mode test)] [:--wal-sync-mode (name m)])
-         (when-let [m (:txn-mode test)]      [:--txn-mode      (name m)])))))
+         (when-let [m (:txn-mode test)]      [:--txn-mode      (name m)])
+         ; This makes it deeply frustrating to debug
+         :--connection-timeout 0
+         :--max-connections 16384))))
 
 (defn db
   "Constructs a new DB for the test, given CLI opts."
   [opts]
   (map->DB {:lazyfs (lazyfs/db {:dir data-dir})}))
+
+(defrecord JointDB [pg pdb]
+  db/DB
+  (setup! [this test node]
+    (let [pg  (future (db/setup! pg test node))
+          pdb (future (db/setup! pdb test node))]
+      @pg
+      @pdb))
+
+  (teardown! [this test node]
+    (db/teardown! pg test node)
+    (db/teardown! pdb test node))
+
+  db/LogFiles
+  (log-files [this test node]
+    (merge (db/log-files pg test node)
+           (db/log-files pdb test node)))
+
+  db/Pause
+  (pause! [_ test node]
+    (db/pause! pg test node)
+    (db/pause! pdb test node))
+
+  (resume! [_ test node]
+    (db/resume! pg test node)
+    (db/resume! pdb test node))
+
+  db/Kill
+  (kill! [_ test node]
+    (db/kill! pg test node)
+    (db/kill! pdb test node))
+
+  (start! [_ test node]
+    (db/start! pg test node)
+    (db/start! pdb test node)))
+
+(defn joint-db
+  "Postgres and ParticleDB together, for select workloads."
+  [opts]
+  (if (#{:compare} (:workload opts))
+    (JointDB. (pg/db {})
+              (db opts))))

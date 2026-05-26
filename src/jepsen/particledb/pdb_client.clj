@@ -11,18 +11,16 @@
   (:import (java.sql SQLException)
            (org.particledb Driver)))
 
-(def port 5440)
-
 (defn open
   "Opens a JDBC connection to the given node."
   [test node]
   (->> {:dbtype "particledb"
-              ; First it was com.particledb, then ai.particledb, now
-              ; org.particledb??? I feel like an LLM is probably responsible
-              ; for this nonsense...
-              :classname "org.particledb.Driver"
-              :host node
-              :port port}
+        ; First it was com.particledb, then ai.particledb, now
+        ; org.particledb??? I feel like an LLM is probably responsible
+        ; for this nonsense...
+        :classname "org.particledb.Driver"
+        :host node
+        :port (:postgres-port test)}
        j/get-datasource
        j/get-connection))
 
