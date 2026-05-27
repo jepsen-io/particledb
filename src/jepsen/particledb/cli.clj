@@ -139,7 +139,8 @@
 (defn particledb-test
   "Takes CLI options and constructs a Jepsen test map"
   [opts]
-  (let [_               (rand/set-seed! (:seed opts (rand/long)))
+  (let [seed (rand/long)
+        _ (rand/set-seed! seed)
         workload-name   (:workload opts)
         workload        ((workloads workload-name) opts)
         db              (db/joint-db opts)
@@ -200,6 +201,7 @@
         (merge
           opts
           {:name     (test-name opts)
+           :seed     seed
            :os       os
            :db       db
            :checker  (checker/compose
@@ -365,6 +367,12 @@
                                   :corrupt-file-type  ft
                                   :txn-mode           t
                                   :workload           w))))))
+(defn opt-fn!
+  "Post-processes CLI options. As a side effect, we initialize the RNG here."
+  [opts]
+  (when-let [seed (:seed (:options opts))]
+    (rand/set-seed! seed))
+  opts)
 
 (defn -main
   "Handles command line arguments. Can either run a test, or a web server for
@@ -372,9 +380,11 @@
   [& args]
   ;(a/with-rng
     (cli/run! (merge (cli/single-test-cmd {:test-fn  particledb-test
+                                           :opt-fn   opt-fn!
                                            :opt-spec cli-opts})
                      (cli/test-all-cmd
                        {:tests-fn all-tests
+                        :opt-fn   opt-fn!
                         :opt-spec (cli/without-defaults-for
                                     [:workload :nemesis :lazyfs]
                                     cli-opts)})
