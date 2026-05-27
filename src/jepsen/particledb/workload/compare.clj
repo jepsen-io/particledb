@@ -171,6 +171,7 @@
                        (< 1 (count pg))
                        "different data"
 
+                       ; One or fewer rows; possibly a metadata row like update-count
                        (and (= [:next.jdbc/update-count]
                                (keys (first pg))
                                (keys (first pdb))))
@@ -320,14 +321,16 @@
     (case n
       0 nil
       1 (first branches)
-      `(case (hc/gen (g/integer 0 ~(dec n)))
-         ~@(mapcat identity (map-indexed vector branches))))))
+      `(hc/with-span
+         (case (hc/gen (g/integer 0 ~(dec n)))
+           ~@(mapcat identity (map-indexed vector branches)))))))
 
 (defn gen-nth
   "Picks a random element of the given vector."
   [xs]
-  (g/let [i (g/integer 0 (dec (count xs)))]
-    (nth xs i)))
+  (hc/with-span
+    (g/let [i (g/integer 0 (dec (count xs)))]
+      (nth xs i))))
 
 (def column-names
   "What we call columns"
@@ -343,16 +346,17 @@
     (g/constant :boolean)
     (g/constant :smallint) ; 2 bytes
     (g/constant :bigint)   ; 8 bytes
-    (g/constant :float4)
+    (g/constant :float)
+    (g/constant :double)
     (g/constant :text)))
 
 (def all-types
   "All possible types."
-  #{:smallint :bigint :float4 :boolean :text})
+  #{:smallint :bigint :float :double :boolean :text})
 
 (def num-types
   "All numeric types"
-  #{:smallint :bigint :float4})
+  #{:smallint :bigint :float :double})
 
 (defn general-type
   "Generalize a type up to a set of compatible types."
@@ -361,7 +365,8 @@
     :smallint num-types
     :bigint   num-types
     :int      num-types
-    :float4   num-types
+    :float    num-types
+    :double   num-types
     type))
 
 (def gen-boolean-lit
@@ -396,37 +401,47 @@
   ; These are one bigger than the actual bounds
   (g/integer -9223372036854775809 9223372036854775808))
 
+(defn float->str
+  "Converts a float to an SQL string."
+  [f]
+  (cond
+    (NaN? f)      "'NaN'"
+    (infinite? f) (str "'" (str f) "'")
+    true          (str f)))
+
 (def gen-float-lit
-  "A schema for float literals."
-  (g/fmap (fn [f]
-            (cond
-              (NaN? f)      "'NaN'"
-              (infinite? f) (str "'" (str f) "'")
-              true          (str f)))
-          (g/float {:width 32})))
+  "A schema for `real` float literals."
+  (g/fmap float->str (g/float {:width 32})))
+
+(def gen-double-lit
+  "A schema for `double` float literals."
+  (g/fmap float->str (g/float {:width 64})))
 
 (defn gen-lit-
   "Generates a literal value for a column schema, based on its type."
   [type]
   (if (set? type)
     (recur (gen-nth (vec type)))
-    (hc/gen
-      (case type
-        :int      gen-int-lit
-        :smallint gen-smallint-lit
-        :bigint   gen-bigint-lit
-        :float4   gen-float-lit
-        :text     gen-string-lit
-        :boolean  gen-boolean-lit
-        ))))
+    (hc/with-span
+      (hc/gen
+        (case type
+          :int      gen-int-lit
+          :smallint gen-smallint-lit
+          :bigint   gen-bigint-lit
+          :float    gen-float-lit
+          :double   gen-double-lit
+          :text     gen-string-lit
+          :boolean  gen-boolean-lit
+          )))))
 
 (defn gen-lit
   "Generates a possibly NULL literal value of the given type."
   [type]
-  (g/let [nullp (g/float 0 1)]
-    (if (< 0.9 nullp)
-      "NULL"
-      (gen-lit- type))))
+  (hc/with-span
+    (g/let [nullp (g/float 0 1)]
+      (if (< 0.9 nullp)
+        "NULL"
+        (gen-lit- type)))))
 
 (defn gen-expr-leaf
   "Generates a simple expression of the given type which is valid in the given
@@ -455,13 +470,14 @@
 (defn gen-type
   "Generates a type thats in the given table."
   [table]
-  (->> (:cols table)
-       (map :type)
-       distinct
-       (map g/constant)
-       (apply g/one-of)
-       (g/fmap general-type)
-       hc/gen))
+  (hc/with-span
+    (->> (:cols table)
+         (map :type)
+         distinct
+         (map g/constant)
+         (apply g/one-of)
+         (g/fmap general-type)
+         hc/gen)))
 
 ;; Expression generating
 
@@ -474,17 +490,19 @@
 (defn gen-expr-num-binary
   "Generates a binary numeric expression, like (1 + b)"
   [table]
-  (g/let [a  (gen-expr-leaf table num-types)
-          b  (gen-expr-leaf table num-types)
-          op (g/one-of "+" "-" "*" "/" "%" "^")]
-    (str "(" a " " op " " b ")")))
+  (hc/with-span
+    (g/let [a  (gen-expr-leaf table num-types)
+            b  (gen-expr-leaf table num-types)
+            op (apply g/one-of (mapv g/constant ["+" "-" "*" "/" "%" "^"]))]
+      (str "(" a " " op " " b ")"))))
 
 (defn gen-expr-num
   "Generates a numeric expression, like 4, a, or (a - b)"
   [table]
-  (gen-branch
-    (gen-expr-leaf table num-types)
-    (gen-expr-num-binary table)))
+  (hc/with-span
+    (gen-branch
+      (gen-expr-leaf table num-types)
+      (gen-expr-num-binary table))))
 
 ;; Boolean expressions
 
@@ -499,21 +517,23 @@
 (defn gen-expr-boolean-null
   "Generates a boolean expression which checks for null."
   [table]
-  (g/let [not? (g/boolean)]
-    (str "(" (gen-expr table all-types) " IS " (when not? "NOT ")
-         "NULL)")))
+  (hc/with-span
+    (g/let [not? (g/boolean)]
+      (str "(" (gen-expr table all-types) " IS " (when not? "NOT ")
+           "NULL)"))))
 
 (defn gen-expr-boolean-comp
   "Generates a boolean expression which compares things."
   [table]
-  (g/let [same-type? (g/boolean)
-          type       (gen-type table)
-          a          (gen-expr table type)
-          b          (gen-expr table (if same-type?
-                                       type
-                                       (gen-type table)))
-          op binary-comparators]
-    (str "(" a " " op " " b ")")))
+  (hc/with-span
+    (g/let [same-type? (g/boolean)
+            type       (gen-type table)
+            a          (gen-expr table type)
+            b          (gen-expr table (if same-type?
+                                         type
+                                         (gen-type table)))
+            op binary-comparators]
+      (str "(" a " " op " " b ")"))))
 
 (defn gen-expr-boolean-branch
   "Generates a compound boolean expression using AND/OR/NOT"
@@ -535,14 +555,16 @@
 (defn gen-expr
   "Generates an expression of the given type in the table."
   [table type]
-  (case type
-    :boolean  (gen-expr-boolean table)
-    :smallint (gen-expr-num table)
-    :int      (gen-expr-num table)
-    :bigint   (gen-expr-num table)
-    :float    (gen-expr-num table)
-    num-types (gen-expr-num table)
-    (gen-expr-leaf table type)))
+  (hc/with-span
+    (case type
+      :boolean  (gen-expr-boolean table)
+      :smallint (gen-expr-num table)
+      :int      (gen-expr-num table)
+      :bigint   (gen-expr-num table)
+      :float    (gen-expr-num table)
+      :double   (gen-expr-num table)
+      num-types (gen-expr-num table)
+      (gen-expr-leaf table type))))
 
 (defn gen-column-schema
   "Generates a column schema. A column schema is a map of the form:
@@ -764,7 +786,7 @@
   (hc/sample n
              (let [schema (gen-schema 0)
                    table  (gen-nth schema)]
-               [table (gen-expr-boolean-comp table)])))
+               [table (gen-lit :float)])))
 
 ;; Checker
 
