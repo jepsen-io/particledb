@@ -25,7 +25,11 @@ At present, these tests are only for single-node deployments, so you should
 provide only one DB node.
 
 The `compare` workload also requires the [uv package
-manager](https://docs.astral.sh/uv/), for the Hegel generative testing library.
+manager](https://docs.astral.sh/uv/), for the Hegel generative testing library. On Debian, install it with:
+
+```
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
 
 ## Workloads
 

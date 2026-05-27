@@ -91,12 +91,17 @@
                    "multiple assignments to same column"
 
                    ; You can order by something that's not in the agg fun
+                   ; TODO: repro this again
                    #"column .+ must appear in the GROUP BY clause"
                    "column must appear in group by"
 
                    ; I... what... how even...
                    #"operator does not exist"
                    "operator does not exist"
+
+                   ; Want to ask if 0 = ':'? Sure, why not
+                   #"invalid input syntax"
+                   "invalid input syntax"
 
                    ; What is type safety for, really?
                    #"is of type .+"
@@ -113,10 +118,6 @@
                    ; Or duplicate constraints
                    #"violates unique constraint"
                    "unique constraint"
-
-                   ; Want to ask if 0 = ':'? Sure, why not
-                   #"invalid input syntax"
-                   "invalid input syntax"
 
                    ; You can select nonexistent columns!
                    #"column .+ does not exist"
@@ -339,10 +340,10 @@
 (def gen-column-types
   "A schema to generate column types."
   (g/one-of
+    (g/constant :boolean)
     (g/constant :smallint) ; 2 bytes
     (g/constant :bigint)   ; 8 bytes
     (g/constant :float4)
-    (g/constant :boolean)
     (g/constant :text)))
 
 (def all-types
@@ -366,8 +367,7 @@
 (def gen-boolean-lit
   "A schema for boolean literals"
   (g/one-of (g/constant "TRUE")
-            (g/constant "FALSE")
-            (g/constant "NULL")))
+            (g/constant "FALSE")))
 
 (def gen-string-lit
   "A schema for string literals. We're not going to go crazy here--I assume
@@ -423,8 +423,8 @@
 (defn gen-lit
   "Generates a possibly NULL literal value of the given type."
   [type]
-  (g/let [null? false]; (g/boolean)]
-    (if null?
+  (g/let [nullp (g/float 0 1)]
+    (if (< 0.9 nullp)
       "NULL"
       (gen-lit- type))))
 
@@ -434,6 +434,8 @@
   type."
   [table type]
   (gen-branch
+    ; Literal
+    (gen-lit type)
     ; Column
     (->> (:cols table)
          (filter (if (keyword? type)
@@ -444,8 +446,6 @@
          (map (comp g/constant :name))
          (apply g/one-of)
          hc/gen)
-    ; Literal
-    (gen-lit type)
     ; Sometimes, make up a random name just for grins. I can't believe this
     ; actually works in ParticleDB, but it does. We choose a-f so that we
     ; *mostly* generate real column names, but sometimes of the wrong type, and
@@ -490,8 +490,8 @@
 
 (declare gen-expr-boolean)
 
-(def boolean-comparators
-  "A schema for boolean comparators like <, =, !=, ..."
+(def binary-comparators
+  "A schema for binary comparators like <, =, !=, ..."
   (apply g/one-of
          (mapv g/constant
                ["=" "!=" "<" ">" "<=" ">="])))
@@ -512,7 +512,7 @@
           b          (gen-expr table (if same-type?
                                        type
                                        (gen-type table)))
-          op boolean-comparators]
+          op binary-comparators]
     (str "(" a " " op " " b ")")))
 
 (defn gen-expr-boolean-branch
@@ -537,11 +537,12 @@
   [table type]
   (case type
     :boolean  (gen-expr-boolean table)
+    :smallint (gen-expr-num table)
     :int      (gen-expr-num table)
+    :bigint   (gen-expr-num table)
     :float    (gen-expr-num table)
     num-types (gen-expr-num table)
     (gen-expr-leaf table type)))
-
 
 (defn gen-column-schema
   "Generates a column schema. A column schema is a map of the form:
@@ -647,7 +648,7 @@
         col-gen (apply g/one-of (mapv g/constant (:cols table)))]
     (g/let [; ParticleDB doesn't mind setting a = 1, a = 2, but PG does, and
             ; that's noisy.
-            col-is (g/vector {:unique? true
+            col-is (g/vector {:unique? (< (hc/gen (g/float 0 1)) 0.01)
                               :min-size 1
                               :max-size (count cols)}
                              (g/integer 0 (dec (count cols))))
@@ -759,8 +760,8 @@
 
 (defn sample-exprs
   "Generates a few random expressions with Hegel. Helpful for debugging."
-  []
-  (hc/sample 10
+  [n]
+  (hc/sample n
              (let [schema (gen-schema 0)
                    table  (gen-nth schema)]
                [table (gen-expr-boolean-comp table)])))
@@ -777,7 +778,7 @@
 (defn condense-sql
   "Condenses a single SQL statement; see condense-case."
   [sql-str]
-  (str/replace sql-str #" ([tuv])_\d+[ ;\,]" " $1 "))
+  (str/replace sql-str #" ([tuv])_\d+([ \;\,])" " $1$2"))
 
 (defn condense-op
   "Rewrites an operation so that it is easier to understand and explore
