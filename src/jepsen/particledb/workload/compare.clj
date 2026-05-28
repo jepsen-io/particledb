@@ -75,7 +75,7 @@
          (if (equiv? mop)
            (recur)
            ; Found a diff
-           (do ;(info :diff (pr-str pg) (pr-str pdb))
+           (do (info :diff (pr-str pg) (pr-str pdb))
                (cond
                  ; PG threw an error
                  (and (map? pg) (:msg pg))
@@ -127,7 +127,7 @@
                    #"out of range"
                    "out of range"
 
-                   "unknown")
+                   "unknown postgres error")
 
                  ; PDB threw an error
                  (and (map? pdb) (:msg pdb))
@@ -150,33 +150,39 @@
                    #"invalid integer"
                    "invalid integer"
 
-                   ; Oh this is neat. 'Infinity' and 0.0 are... considered
-                   ; duplicates for a unique constraint? This is hilarious
-                   ; given ParticleDB seems totally incapable of doing
-                   ; uniqueness on integers.
+                   ; Oh this is neat. All floating point numbers (e.g. 0.0,
+                   ; 1.2, and Infinity) are considered duplicates for a unique
+                   ; constraint? This is hilarious given ParticleDB seems
+                   ; totally incapable of doing uniqueness on integers.
+                   ; TODO: write this up
                    #"duplicate key value"
                    "duplicate key value"
 
-                   "unknown")
+                   "unknown particledb error")
 
                  ; We got results, but... they differed
                  (and (vector? pg) (vector? pdb))
-                 (cond (not= (count pg) (count pdb))
+                 (cond ; TODO: write this up
+                       (not= (count pg) (count pdb))
                        "different number of rows"
 
+                       ; TODO: write this up
                        (not= (reduce set/union #{} (map (comp set keys) pg))
                              (reduce set/union #{} (map (comp set keys) pdb)))
                        "different columns"
 
+                       ; TODO: write this up
                        (< 1 (count pg))
                        "different data"
 
+                       ; TODO: write this up
                        ; One or fewer rows; possibly a metadata row like update-count
                        (and (= [:next.jdbc/update-count]
                                (keys (first pg))
                                (keys (first pdb))))
                        "different update count"
 
+                       ; TODO: write this up
                        true
                        "different data")
 
@@ -229,7 +235,7 @@
                :value (cond-> (assoc (:value op)
                                      :sql    sql'
                                      :status status)
-                        origin (assoc :origin origin))))))
+                        (= :interesting status) (assoc :origin origin))))))
 
   (teardown! [this test])
 
@@ -294,7 +300,7 @@
           (assoc this :results (dissoc results id)))
 
         ; Infos we'll send back as invalid, I guess
-        :info 
+        :info
         (let [id (:id (:value event))
               result (get results id)]
           (deliver result {:status :invalid})
@@ -323,7 +329,10 @@
       1 (first branches)
       `(hc/with-span
          (case (hc/gen (g/integer 0 ~(dec n)))
-           ~@(mapcat identity (map-indexed vector branches)))))))
+           ~@(->> branches
+                  (map-indexed (fn [i form]
+                                 [i `(hc/with-span ~form)]))
+                  (mapcat identity)))))))
 
 (defn gen-nth
   "Picks a random element of the given vector."
@@ -346,17 +355,17 @@
     (g/constant :boolean)
     (g/constant :smallint) ; 2 bytes
     (g/constant :bigint)   ; 8 bytes
-    (g/constant :float)
+    (g/constant :real)
     (g/constant :double)
     (g/constant :text)))
 
 (def all-types
   "All possible types."
-  #{:smallint :bigint :float :double :boolean :text})
+  #{:smallint :bigint :real :double :boolean :text})
 
 (def num-types
   "All numeric types"
-  #{:smallint :bigint :float :double})
+  #{:smallint :bigint :real :double})
 
 (defn general-type
   "Generalize a type up to a set of compatible types."
@@ -365,7 +374,7 @@
     :smallint num-types
     :bigint   num-types
     :int      num-types
-    :float    num-types
+    :real     num-types
     :double   num-types
     type))
 
@@ -409,13 +418,26 @@
     (infinite? f) (str "'" (str f) "'")
     true          (str f)))
 
-(def gen-float-lit
+(def gen-real-lit
   "A schema for `real` float literals."
   (g/fmap float->str (g/float {:width 32})))
 
 (def gen-double-lit
   "A schema for `double` float literals."
   (g/fmap float->str (g/float {:width 64})))
+
+(def gen-absurd-float-lit
+  "A schema for a truly ludicrous float."
+  (g/constant "1.234E400"))
+
+(defn almost-always
+  "A generator which is almost always one thing, but rarely another."
+  [common rare]
+  (g/bind (fn [f]
+            (if (< 0.99 f)
+              rare
+              common))
+          (g/float 0 1)))
 
 (defn gen-lit-
   "Generates a literal value for a column schema, based on its type."
@@ -428,8 +450,10 @@
           :int      gen-int-lit
           :smallint gen-smallint-lit
           :bigint   gen-bigint-lit
-          :float    gen-float-lit
-          :double   gen-double-lit
+          ; For PG, 32-bit IEEE 754
+          :real     (almost-always gen-real-lit gen-absurd-float-lit)
+          ; For PG, 64-bit IEEE 754
+          :double   (almost-always gen-double-lit gen-absurd-float-lit)
           :text     gen-string-lit
           :boolean  gen-boolean-lit
           )))))
@@ -491,8 +515,8 @@
   "Generates a binary numeric expression, like (1 + b)"
   [table]
   (hc/with-span
-    (g/let [a  (gen-expr-leaf table num-types)
-            b  (gen-expr-leaf table num-types)
+    (g/let [a  (gen-expr-num table)
+            b  (gen-expr-num table)
             op (apply g/one-of (mapv g/constant ["+" "-" "*" "/" "%" "^"]))]
       (str "(" a " " op " " b ")"))))
 
@@ -561,7 +585,7 @@
       :smallint (gen-expr-num table)
       :int      (gen-expr-num table)
       :bigint   (gen-expr-num table)
-      :float    (gen-expr-num table)
+      :real     (gen-expr-num table)
       :double   (gen-expr-num table)
       num-types (gen-expr-num table)
       (gen-expr-leaf table type))))
@@ -589,7 +613,10 @@
 (defn column-schema->sql
   "Turns a column schema into the SQL to create it."
   [{:keys [type primary-key? unique? not-null?] :as col}]
-  (str (:name col) " " (name type)
+  (str (:name col) " "
+       (case type
+         :double "double precision"
+         (name type))
        (when not-null? " NOT NULL")
        (when unique? " UNIQUE")
        (when primary-key? " PRIMARY KEY")))
@@ -658,35 +685,37 @@
 (defn gen-where?
   "Maybe generates a WHERE clause"
   [table]
-  (gen-branch
-    ""
-    (str " WHERE " (gen-expr-boolean table))))
+  (hc/with-span
+    (gen-branch
+      ""
+      (str " WHERE " (gen-expr-boolean table)))))
 
 (defn gen-update
   "Generates an UPDATE statement."
   [schema]
-  (let [table   (gen-nth schema)
-        cols    (:cols table)
-        col-gen (apply g/one-of (mapv g/constant (:cols table)))]
-    (g/let [; ParticleDB doesn't mind setting a = 1, a = 2, but PG does, and
-            ; that's noisy.
-            col-is (g/vector {:unique? (< (hc/gen (g/float 0 1)) 0.01)
-                              :min-size 1
-                              :max-size (count cols)}
-                             (g/integer 0 (dec (count cols))))
-            cols   (map cols col-is)
-            where? (gen-where? table)]
-      (str "UPDATE " (:name table) " SET "
-           (->> cols
-                (mapv (fn [col]
-                        (let [v (gen-branch
-                                  ; Either a literal
-                                  (gen-lit (:type col))
-                                  ; Or another column in the table
-                                  (:name (hc/gen col-gen)))]
-                          (str (:name col) " = " v))))
-                (str/join ", "))
-           where?))))
+  (hc/with-span
+    (let [table   (gen-nth schema)
+          cols    (:cols table)
+          col-gen (apply g/one-of (mapv g/constant (:cols table)))]
+      (g/let [; ParticleDB doesn't mind setting a = 1, a = 2, but PG does, and
+              ; that's noisy.
+              col-is (g/vector {:unique? (< (hc/gen (g/float 0 1)) 0.01)
+                                :min-size 1
+                                :max-size (count cols)}
+                               (g/integer 0 (dec (count cols))))
+              cols   (map cols col-is)
+              where? (gen-where? table)]
+        (str "UPDATE " (:name table) " SET "
+             (->> cols
+                  (mapv (fn [col]
+                          (let [v (gen-branch
+                                    ; Either a literal
+                                    (gen-lit (:type col))
+                                    ; Or another column in the table
+                                    (:name (hc/gen col-gen)))]
+                            (str (:name col) " = " v))))
+                  (str/join ", "))
+             where?)))))
 
 (defn gen-limit?
   "Maybe generates a LIMIT clause"
@@ -721,43 +750,55 @@
   "Generates the list of columns to select from a table, like 'a, b' or '*'"
   [table]
   (let [cols (:cols table)]
-     (g/one-of
-       (g/constant "*")
-       (->> (g/vector {:min-size 1, :max-size 4}
-                      (g/integer 0 (dec (count cols))))
-            (g/fmap (fn [is]
-                      (->> is
-                           (map (comp :name cols))
-                           (str/join ", ")))))
-       (g/constant "COUNT(*)"))))
+    (g/one-of
+      (g/constant "*")
+      (->> (g/vector {:min-size 1, :max-size 4}
+                     (g/integer 0 (dec (count cols))))
+           (g/fmap (fn [is]
+                     (->> is
+                          (map (comp :name cols))
+                          (str/join ", ")))))
+      (g/constant "COUNT(*)"))))
 
 (defn gen-select
   "Generates a select statement."
   [schema]
-  (g/let [table  (gen-nth schema)
-          cols   (gen-select-cols table)
-          where  (gen-where? table)
-          order  (gen-order? table)
-          limit  (gen-limit?)
-          offset (gen-offset?)]
-    (str "SELECT " cols " FROM " (:name table)
-         where
-         order
-         limit
-         offset)))
+  (hc/with-span
+    (g/let [table  (gen-nth schema)
+            cols   (gen-select-cols table)
+            where  (gen-where? table)
+            order  (gen-order? table)
+            limit  (gen-limit?)
+            offset (gen-offset?)]
+      (str "SELECT " cols " FROM " (:name table)
+           where
+           order
+           limit
+           offset))))
 
 (defn gen-delete
   "Generates a DELETE statement."
   [schema]
-  (g/let [table (gen-nth schema)
-          where (gen-where? table)]
-    (str "DELETE FROM " (:name table) where)))
+  (hc/with-span
+    (g/let [table (gen-nth schema)
+            where (gen-where? table)]
+      (str "DELETE FROM " (:name table) where))))
 
 (defn gen-statement
   "Generates an SQL statement for a schema."
   [schema]
-  ((gen-nth [gen-select gen-insert gen-update gen-delete])
-   schema))
+  ; I don't know a good way to debias this in Hegel--it wants to pick the first
+  ; option, or 0 in a range of integers, like 4x more than any other option.
+  ; That makes it really hard to get to bugs with multiple inserts.
+  (g/let [f (g/one-of (g/constant gen-select)
+                      (g/constant gen-insert)
+                      (g/constant gen-insert)
+                      (g/constant gen-insert)
+                      (g/constant gen-update)
+                      (g/constant gen-update)
+                      (g/constant gen-update)
+                      (g/constant gen-delete))]
+    (f schema)))
 
 (defn gen-case
   "Generates a test case for a unique integer ID. A case is a map of:
@@ -768,17 +809,26 @@
   [id]
   (let [schema (gen-schema id)]
     {:id  id
+     ; I don't quite know how to convince Hegel to generate long traces using
+     ; new_collection--it almost always wants short histories of just a couple
+     ; statements, and that doesn't find bugs well.
      :sql (g/collect [sqls (schema->create-sql schema)
-                      {:min-size 1 :max-size 128}]
+                      {:min-size 1 :max-size 512}]
                       (conj sqls (gen-statement schema)))
+     ;:sql (g/let [scale (apply g/one-of (mapv g/constant [1 10 100]))
+     ;             n     (g/integer scale (* scale 10))]
+     ;       (hc/with-span
+     ;         (prn :scale scale :n n)
+     ;         (into [] (take n (repeatedly (partial gen-statement schema))))
+     ;         (->> #(gen-statement schema) repeatedly (take n) (into []))))
      :teardown-sql (schema->teardown-sql schema)}))
 
 ;; Debugging
 
 (defn sample-cases
   "Generates a few random cases with Hegel. Helpful for debugging at the repl."
-  []
-  (hc/sample 10 (gen-case 0)))
+  [n]
+  (hc/sample n (gen-case 0)))
 
 (defn sample-exprs
   "Generates a few random expressions with Hegel. Helpful for debugging."
@@ -786,7 +836,7 @@
   (hc/sample n
              (let [schema (gen-schema 0)
                    table  (gen-nth schema)]
-               [table (gen-lit :float)])))
+               (gen-statement schema))))
 
 ;; Checker
 

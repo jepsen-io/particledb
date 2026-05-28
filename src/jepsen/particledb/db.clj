@@ -129,7 +129,7 @@
          (when-let [m (:wal-sync-mode test)] [:--wal-sync-mode (name m)])
          (when-let [m (:txn-mode test)]      [:--txn-mode      (name m)])
          ; This makes it deeply frustrating to debug
-         :--connection-timeout 0
+         :--connection-timeout 10000
          :--max-connections 16384))))
 
 (defn db
