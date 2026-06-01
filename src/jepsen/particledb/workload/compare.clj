@@ -853,15 +853,16 @@
 (defn condense-sql
   "Condenses a single SQL statement; see condense-case."
   [sql-str]
-  (str/replace sql-str #" ([tuv])_\d+([ \;\,])" " $1$2"))
+  (str/replace sql-str #" ([tuv])_\d+([ \;\,]|\Z)" " $1$2"))
 
 (defn condense-op
   "Rewrites an operation so that it is easier to understand and explore
   interactively. Rewrites table names (e.g. 't_123') as simply 't'."
   [op]
   (update-in op [:value :sql]
-             (fn [sql]
-               (mapv #(update % :sql condense-sql) sql))))
+             (fn [statements]
+               (mapv #(update % :sql condense-sql)
+                     statements))))
 
 (defn write-case!
   "Writes a test case op to a file."
