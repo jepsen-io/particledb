@@ -74,45 +74,50 @@
   [a b]
   (let [ca (class a)
         cb (class b)]
-    (if (not (identical? ca cb))
-      ; Different classes is probably bad
-      false
+    (if (identical? a b)
+      true
 
-      ; But some classes we match specially
-      (condp instance? a
-        Keyword
-        (identical? a b)
+      (if (and (not (identical? ca cb))
+               (not (and (float? a)   (float? b)))
+               (not (and (integer? a) (integer? b))))
+        ; Way different classes!
+        false
 
-        Integer
-        (= a b)
+        ; OK, at least comparable classes
+        (condp instance? a
+          Keyword
+          (identical? a b)
 
-        Float
-        (equiv-double a b)
+          Integer
+          (= a b)
 
-        Double
-        (equiv-double? ^Double a ^Double b)
+          Long
+          (= a b)
 
-        Long
-        (= a b)
+          Float
+          (equiv-double? a b)
 
-        String
-        (= a b)
+          Double
+          (equiv-double? a b)
 
-        PersistentArrayMap
-        (and (= (count a) (count b))
-             ; Eh, not efficient but whatevs
-             (loopr []
-                    [k (distinct (concat (keys a) (keys b)))]
-                    (if (equiv? (get a k ::not-found) (get b k ::not-found))
-                      (recur)
-                      false)
-                    true))
+          String
+          (= a b)
 
-        (throw+ {:type   :no-equivalence
-                 :a      a
-                 :b      b
-                 :class-a (symbol (.getName (class a)))
-                 :class-b (symbol (.getName (class b)))})))))
+          PersistentArrayMap
+          (and (= (count a) (count b))
+               ; Eh, not efficient but whatevs
+               (loopr []
+                      [k (distinct (concat (keys a) (keys b)))]
+                      (if (equiv? (get a k ::not-found) (get b k ::not-found))
+                        (recur)
+                        false)
+                      true))
+
+          (throw+ {:type   :no-equivalence
+                   :a      a
+                   :b      b
+                   :class-a (symbol (.getName (class a)))
+                   :class-b (symbol (.getName (class b)))}))))))
 
 (defn equiv-row?
   "Are the given postgres and pdb rows equivalent?"
