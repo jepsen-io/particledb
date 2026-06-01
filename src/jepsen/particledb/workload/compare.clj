@@ -24,7 +24,10 @@
             [jepsen.postgres.client :as pgc]
             [next.jdbc :as j]
             [next.jdbc.result-set :as rs])
-  (:import (clojure.lang PersistentQueue)
+  (:import (clojure.lang Keyword
+                         PersistentArrayMap
+                         PersistentVector
+                         PersistentQueue)
            (org.postgresql.util PSQLException)))
 
 (defn execute!
@@ -43,6 +46,68 @@
     (catch PSQLException e
       {:type :psql-error, :msg (.getMessage e)})))
 
+(defn equiv-double?
+  "Floating-point equivalence. We allow a small difference between results, and
+  consider NaNs equal since we want both DBs to return NaN!"
+  [^double a ^double b]
+  (cond ; This is one of those places where NaNs *are* equivalent!
+        (and (NaN? a) (NaN? b))
+        true
+
+        (or (NaN? a) (NaN? b))
+        false
+
+        (or (infinite? a) (infinite? b))
+        (= a b)
+
+        ; Otherwise, equality to within two units-in-last-place
+        true
+        (let [; How big is the bigger one?
+              scale (Math/max (Math/abs a) (Math/abs b))
+              ; Unit in last place
+              ulp (Math/ulp scale)]
+          (<= (- (Math/abs a) (Math/abs b))
+              (* ulp 2)))))
+
+(defn equiv?
+  "Are the given values equivalent?"
+  [a b]
+  (let [ca (class a)
+        cb (class b)]
+    (if (not (identical? ca cb))
+      ; Different classes is probably bad
+      false
+
+      ; But some classes we match specially
+      (condp instance? a
+        Keyword
+        (identical? a b)
+
+        Double
+        (equiv-double? ^Double a ^Double b)
+
+        Long
+        (= a b)
+
+        String
+        (= a b)
+
+        PersistentArrayMap
+        (and (= (count a) (count b))
+             ; Eh, not efficient but whatevs
+             (loopr []
+                    [k (distinct (concat (keys a) (keys b)))]
+                    (if (equiv? (get a k ::not-found) (get b k ::not-found))
+                      (recur)
+                      false)
+                    true))
+
+        (throw+ {:type   :no-equivalence
+                 :a      a
+                 :b      b
+                 :class-a (symbol (.getName (class a)))
+                 :class-b (symbol (.getName (class b)))})))))
+
 (defn equiv-row?
   "Are the given postgres and pdb rows equivalent?"
   [pg pdb]
@@ -51,11 +116,11 @@
   (if (= 1 (count pg) (count pdb))
     (if (= :?column? (key (first pg)))
       ; Let this pass if the values are the same
-      (= (val (first pg)) (val (first pdb)))
-      (= pg pdb))
-    (= pg pdb)))
+      (equiv? (val (first pg)) (val (first pdb)))
+      (equiv? pg pdb))
+    (equiv? pg pdb)))
 
-(defn equiv?
+(defn equiv-mop?
   "Are the postgres and particledb results for the given SQL query equivalent?
   Takes a map of :sql (a string) and the :pg and :pdb results from j/execute!."
   [{:keys [sql pg pdb]}]
@@ -73,7 +138,7 @@
   [mops]
   (loopr []
          [{:keys [sql pg pdb] :as mop} mops]
-         (if (equiv? mop)
+         (if (equiv-mop? mop)
            (recur)
            ; Found a diff
            (do (info :diff (pr-str pg) (pr-str pdb))
@@ -215,7 +280,7 @@
                           :pg  (execute! pg [sql])
                           :pdb (execute! pdb [sql])})
                        (:sql test-case))
-            status (if (every? equiv? sql')
+            status (if (every? equiv-mop? sql')
                      :valid
                      :interesting)
             ; What kind of bug is this?
@@ -875,7 +940,7 @@
       (doseq [{:keys [sql pg pdb] :as mop} sql]
         (print sql)
         (println ";")
-        (if (equiv? mop)
+        (if (equiv-mop? mop)
           (println (indented-pprint-str "  " pdb))
           (do ; Oh, they're different
               (println "  ParticleDB:")
