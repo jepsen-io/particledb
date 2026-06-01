@@ -20,6 +20,7 @@
                     [util :as util]]
             [jepsen.sql.client :as sqlc]
             [jepsen.particledb.pdb-client :as pdbc]
+            [jepsen.particledb.gen.tc :as gen.tc]
             [jepsen.postgres.client :as pgc]
             [next.jdbc :as j]
             [next.jdbc.result-set :as rs])
@@ -205,6 +206,10 @@
   (invoke! [this test op]
     (binding [sqlc/*error-fn* pgc/error-fn]
       (let [test-case (:value op)
+            ; Tear down first
+            _ (doseq [sql (:teardown-sql test-case)]
+                (execute! pg [sql])
+                (execute! pdb [sql]))
             sql' (mapv (fn [sql]
                          {:sql sql
                           :pg  (execute! pg [sql])
@@ -631,9 +636,10 @@
                          {:min-size 1, :max-size 4}]
                         (let [col (gen-column-schema (column-names i))]
                           (if (and pk? (:primary-key? col)
-                                   ; ParticleDB is happy to let us do several primary
-                                   ; keys, but we don't want to stop there, so we
-                                   ; make these errors relatively rare.
+                                   ; ParticleDB is happy to let us do several
+                                   ; primary keys, but we don't want to stop
+                                   ; there, so we make these errors relatively
+                                   ; rare.
                                    (< 0.01 (hc/gen (g/float 0 1))))
                             :hegel-clj/reject
                             [(conj cols col)
@@ -939,11 +945,15 @@
   [opts]
   (let [last-id (atom -1)
         queue   (atom PersistentQueue/EMPTY)
-        hegel-worker (hegel-worker
-                       {:test-cases 10000
-                        :seed (rand/long)}
-                       last-id
-                       queue)]
+        ;hegel-worker (hegel-worker
+        ;               {:test-cases 10000
+        ;                :seed (rand/long)}
+        ;               last-id
+        ;               queue)]
+        tc-worker (gen.tc/worker {:test-cases 10000
+                                  :seed (rand/long)}
+                                 last-id
+                                 queue)]
     {:client    (Client. nil nil)
      :generator (hegel-gen queue)
      :checker   (Checker.)}))

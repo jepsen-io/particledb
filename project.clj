@@ -32,5 +32,8 @@
              "-server"
              ; OK, sure, why not
              "--add-opens=java.base/java.nio=ALL-UNNAMED"
-             "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"]
+             "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+             ; Our test.check generators need a LOT of stack
+             "-Xss16m"
+             ]
   :profiles {:uberjar {:aot :all}})
