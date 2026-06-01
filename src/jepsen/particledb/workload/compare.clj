@@ -83,6 +83,12 @@
         Keyword
         (identical? a b)
 
+        Integer
+        (= a b)
+
+        Float
+        (equiv-double a b)
+
         Double
         (equiv-double? ^Double a ^Double b)
 
@@ -929,13 +935,23 @@
                (mapv #(update % :sql condense-sql)
                      statements))))
 
+(defn op-size
+  "Roughly how 'big' is an operation? We use this to find small counterexamples
+  to print out."
+  [op]
+  (->> op :value :sql (map (comp #(.size ^String %))) (reduce + 0)))
+
 (defn write-case!
   "Writes a test case op to a file."
-  [test dir {:keys [value] :as op}]
+  [test
+   {:keys [dir origin-dir?]}
+   {:keys [value] :as op}]
   (let [{:keys [id origin sql]} value]
-    (store/with-out-file test (str dir "/" (when origin (str origin " "))
-                                   "/" origin " "
-                                   id ".txt")
+    (store/with-out-file
+      test (str dir "/"
+                (when origin-dir?
+                  (str origin "/"))
+                origin " " id ".txt")
       ; First, step-by-step with results.
       (doseq [{:keys [sql pg pdb] :as mop} sql]
         (print sql)
@@ -968,11 +984,17 @@
                            (h/filter h/ok?)
                            (h/filter (fn [{:keys [value] :as op}]
                                        (= :interesting (:status value))))
-                           (into []))]
+                           (into []))
+          smallest (->> interesting
+                        (group-by (comp :origin :value))
+                        (mapv (fn [[origin ops]]
+                                (first (sort-by op-size ops)))))]
       (doseq [op final]
-        (write-case! test "final" op))
+        (write-case! test {:origin-dir? false :dir "final"} op))
+      (doseq [op smallest]
+        (write-case! test {:origin-dir? false :dir "smallest"} op))
       (doseq [op interesting]
-        (write-case! test "interesting" op))
+        (write-case! test {:origin-dir? true :dir "interesting"} op))
 
       {:valid? (not (seq interesting))
        :interesting interesting
