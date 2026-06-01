@@ -85,6 +85,9 @@
 
         ; OK, at least comparable classes
         (condp instance? a
+          Boolean
+          (= a b)
+
           Keyword
           (identical? a b)
 
@@ -321,6 +324,8 @@
     (sqlc/close-conn! pg)
     (sqlc/close-conn! pdb)))
 
+(declare write-case!)
+
 ; A case is a map of:
 ;
 ; {:id        A unique integer ID for this case
@@ -374,6 +379,12 @@
               _ (assert (keyword? status))]
           ; Send back to Hegel
           (deliver result (select-keys (:value event) [:status :origin]))
+          ; If we get an interesting case, write it right now.
+          (when (= :interesting status)
+            (future (write-case! test
+                                {:dir "interesting"
+                                 :origin-dir? true}
+                                event)))
           ; And we don't need to track that result any more
           (assoc this :results (dissoc results id)))
 
@@ -1031,7 +1042,6 @@
                 (recur))
             ; Done
             (swap! queue conj :stop)))))))
-
 
 (defn workload
   "Constructs a workload given CLI options."
