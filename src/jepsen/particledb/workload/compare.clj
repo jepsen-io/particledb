@@ -171,18 +171,15 @@
                              (reduce set/union #{} (map (comp set keys) pdb)))
                        "different columns"
 
-                       ; TODO: write this up
                        (< 1 (count pg))
                        "different data"
 
-                       ; TODO: write this up
                        ; One or fewer rows; possibly a metadata row like update-count
                        (and (= [:next.jdbc/update-count]
                                (keys (first pg))
                                (keys (first pdb))))
                        "different update count"
 
-                       ; TODO: write this up
                        true
                        "different data")
 
