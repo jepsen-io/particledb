@@ -87,7 +87,7 @@
     ; The log file will have ANSI color escapes, so we rewrite it
     (c/su
       (let [plain-file (str log-file ".plain")]
-      (c/exec :ansifilter :-p :-i log-file :-o plain-file)
+      (c/exec :ansifilter :--max-size "16G" :-p :-i log-file :-o plain-file)
       {plain-file               "daemon.log"
        (cu/tarball! data-dir)   "data.tar.gz"})))
 

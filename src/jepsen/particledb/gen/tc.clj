@@ -646,7 +646,7 @@
       :max-column-count The maximum number of columns"
   [opts]
   (g/let [schema      (gen-schema opts)
-          statements  (g/vector (gen-statement schema) 100 100)]
+          statements  (g/vector (gen-statement schema) 1 64)]
     {:sql (into (schema->create-sql schema)
                 (balance-txns statements))
      :teardown-sql (schema->teardown-sql schema)}))
@@ -759,13 +759,20 @@
           (case-size (first (:args (:shrinking opts)))))
     nil))
 
+(declare origin-worker!)
+
 (defn qc!
   "Runs quick-check on a case from the given generator, drawing IDs from the
-  `last-id` atom. Returns quickcheck output."
-  [n seed gen queue last-id]
+  `last-id` atom. Returns quickcheck output. Options:
+
+    :pool           The atom tracking origin worker state
+    :seed           The random seed
+    :test-cases     The number of test cases to run
+    :target-origin  The origin string we're hunting for."
+  [{:keys [pool seed test-cases target-origin] :as opts} gen queue last-id]
   (let [checked
         (tc/quick-check
-          n
+          test-cases
           (prop/for-all [case gen]
                         (let [result  (promise)
                               id      (swap! last-id inc)
@@ -775,8 +782,19 @@
                                              :result result)]
                           ; Send case to generator
                           (swap! queue conj case)
-                          ; Is it interesting?
-                          (not (= :interesting (:status @result)))))
+                          ; Wait for a client to execute it
+                          (let [{:keys [status origin]} @result]
+                            ; If we see an origin, spawn a worker to hunt for
+                            ; it.
+                            (when origin
+                              (origin-worker! (assoc opts :target-origin origin)
+                                              last-id queue))
+                            ; Is it interesting, and does it match the target
+                            ; origin?
+                            (not (and (= :interesting status)
+                                      (or (nil? target-origin)
+                                          (= target-origin origin)))))))
+
           :seed seed
           :reporter-fn qc-report)]
     (info "Test.check pass completed:\n"
@@ -786,7 +804,7 @@
 (defn worker-pass-1!
   "The first pass of our hunt: we generate increasingly large schemas, looking
   for bugs. Returns a test.check map."
-  [test-opts last-id queue]
+  [opts last-id queue]
   ; We are *very* bad at shrinking schemas (for the usual test.check
   ; bind reasons), so we build a loop that gradually expands the
   ; schemas over time.
@@ -796,8 +814,7 @@
     (info "Trying up to"
           max-table-count "tables and"
           max-column-count "columns")
-    (let [checked (qc! (:test-cases test-opts)
-                       (:seed test-opts)
+    (let [checked (qc! opts
                        (gen-case
                          {:max-table-count  max-table-count
                           :max-column-count max-column-count})
@@ -824,13 +841,48 @@
 (defn worker-pass-2!
   "The second pass of our hunt. We take an existing test case, construct a
   generator from it, and throw it back into test.check."
-  [test-opts case last-id queue]
+  [opts last-id queue case]
   (info "Pass 2: custom shrinking case of" (count (:sql case)) "operations")
-  (let [checked (qc! 10 (:seed test-opts) (case->gen case) queue last-id)]
+  (let [checked (qc! opts (case->gen case) queue last-id)]
     (if-let [smallest (first (:smallest (:shrunk checked)))]
       (info "Pass 2: shrunk to" (case-size smallest))
       (info "Pass 2: did not shrink"))
     checked))
+
+(defn origin-worker!
+  "May start a test.check worker thread to chase down a specific origin string.
+  Draws unique IDs from last-id, an atom holding an integer. Sends cases to the
+  given atom holding a PersistentQueue. Options are:
+
+      :pool           The atom tracking origin worker state
+      :target-origin  The origin we're trying to find
+      :test-cases     The number of test cases to run
+      :seed           The random seed"
+  [{:keys [pool target-origin] :as opts} last-id queue]
+  ; Check whether anyone else is looking for this
+  (let [[pool0] (swap-vals! pool (fn [pool]
+                                   (if (contains? pool target-origin)
+                                     pool
+                                     (assoc pool target-origin :running))))]
+    (when-not (contains? pool0 target-origin)
+      ; We're the first to look for this origin
+      (future
+        (util/with-thread-name (str "jepsen test.check " target-origin)
+          (info "Hunting for origin" target-origin)
+          (try
+            (let [checked (worker-pass-1! opts last-id queue)]
+              (when-let [smallest (first (:smallest (:shrunk checked)))]
+                (worker-pass-2! opts last-id queue smallest)))
+            (catch Throwable t
+              (warn t "Jepsen test.check origin worker crashed!")
+              (throw t))
+            (finally
+              (info "Done hunting for origin" target-origin)
+              ; Mark ourselves as complete. If we're the last worker, tell the
+              ; generator queue it's OK to stop.
+              (let [pool0 (swap! pool assoc target-origin :done)]
+                (when (every? #{:done} (vals pool0))
+                  (swap! queue conj :stop))))))))))
 
 (defn worker
   "Starts a test.check worker thread. Draws unique IDs from last-id, an atom
@@ -838,16 +890,27 @@
   Options are:
 
       :test-cases The number of test cases to run
-      :seed       The random seed"
-  [test-opts last-id queue]
+      :seed       The random seed
+
+  This worker manages other workers; it will spawn a series of origin workers
+  to chase down each unique origin it finds."
+  [opts last-id queue]
+  (let [; This is a map of origin strings to origin worker states: initially
+        ; :running, and :done when complete.
+        pool (atom {:supervisor :running})
+        opts (assoc opts :pool pool)]
   (future
     (util/with-thread-name "jepsen test.check"
       (try
-        (let [checked (worker-pass-1! test-opts last-id queue)]
+        (let [checked (worker-pass-1! opts last-id queue)]
           (when-let [smallest (first (:smallest (:shrunk checked)))]
-            (worker-pass-2! test-opts smallest last-id queue)))
+            (worker-pass-2! opts smallest last-id queue)))
         (catch Throwable t
           (warn t "Jepsen test.check worker crashed!")
           (throw t))
         (finally
-          (swap! queue conj :stop))))))
+          ; Mark ourselves as complete. If we're the last worker, tell the
+          ; generator queue it's OK to stop.
+          (let [pool0 (swap! pool assoc :supervisor :done)]
+            (when (every? #{:done} (vals pool0))
+              (swap! queue conj :stop)))))))))
