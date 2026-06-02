@@ -31,6 +31,9 @@
     (condp identical? (class e)
       SQLException
       (condp re-find m
+        #"PDB JDBC: null"
+        {:type :pdb-jdbc-null, :msg m, :definite? false}
+
         #"could not serialize access"
         {:type :could-not-serialize, :msg m, :definite? true}
 
