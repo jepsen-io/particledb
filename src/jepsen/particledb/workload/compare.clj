@@ -220,6 +220,10 @@
                    #"out of range"
                    "out of range"
 
+                   ; Or divide by zero
+                   #"division by zero"
+                   "division by zero"
+
                    "unknown postgres error")
 
                  ; PDB threw an error
@@ -250,6 +254,9 @@
                    ; TODO: write this up
                    #"duplicate key value"
                    "duplicate key value"
+
+                   #"unsupported .+ operator"
+                   "unsupported operator"
 
                    "unknown particledb error")
 
