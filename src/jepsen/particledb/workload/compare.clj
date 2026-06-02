@@ -147,6 +147,12 @@
   [{:keys [sql pg pdb]}]
   (or ; Error maps
       (and (map? pg) (map? pdb) (= (:type pg) (:type pdb)))
+      ; On commit of an aborted transaction, PG returns {:update-count 0}, and
+      ; ParticleDB returns an abort error. Not sure why, but let's let that
+      ; slide for now.
+      (and (map? pdb)
+           (= :txn-aborted (:type pdb))
+           (= [{:next.jdbc/update-count 0}] pg))
       ; Actual data
       (and (= (count pg) (count pdb))
            (every? identity

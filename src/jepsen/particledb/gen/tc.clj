@@ -822,8 +822,8 @@
           max-column-count "columns")
     (let [checked (qc! opts
                        (gen-case
-                         (assoc opts
-                                :max-table-count  max-table-count
+                         (assoc (select-keys opts [:max-statement-count])
+                                :max-table-count max-table-count
                                 :max-column-count max-column-count))
                        queue
                        last-id)]
