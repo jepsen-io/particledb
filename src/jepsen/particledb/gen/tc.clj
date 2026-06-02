@@ -153,7 +153,7 @@
        (when (#{:text} type)
          ; I think they're using the C collation even over utf8 columns?
          ; Oh, you *can't* create collated columns in ParticleDB. Sigh.
-         ;" COLLATE \"pg_c_utf8\""
+         " COLLATE pg_c_utf8"
          )))
 
 (defn remove-duplicate-primary-keys

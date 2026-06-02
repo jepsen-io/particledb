@@ -267,7 +267,8 @@
                        (< 1 (count pg))
                        "different data"
 
-                       ; One or fewer rows; possibly a metadata row like update-count
+                       ; One or fewer rows; possibly a metadata row like
+                       ; update-count
                        (and (= [:next.jdbc/update-count]
                                (keys (first pg))
                                (keys (first pdb))))
