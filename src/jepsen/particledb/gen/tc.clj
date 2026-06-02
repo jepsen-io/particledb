@@ -1,11 +1,13 @@
 (ns jepsen.particledb.gen.tc
   "A test.check generator for a series of SQL statements."
-  (:require [clojure [pprint :refer [pprint]]
-             [set :as set]
-             [string :as str]]
+  (:require [clojure [math :refer [round]]
+                     [pprint :refer [pprint]]
+                     [set :as set]
+                     [string :as str]]
             [clojure.test.check :as tc]
             [clojure.test.check [generators :as g]
-                                [properties :as prop]]
+                                [properties :as prop]
+                                [rose-tree :as rose]]
             [clojure.tools.logging :refer [info warn]]
             [com.gfredericks.test.chuck.generators :as g']
             [dom-top.core :refer [loopr]]
@@ -644,19 +646,127 @@
       :max-column-count The maximum number of columns"
   [opts]
   (g/let [schema      (gen-schema opts)
-          statements  (g/vector (gen-statement schema) 1 1024)]
+          statements  (g/vector (gen-statement schema) 100 100)]
     {:sql (into (schema->create-sql schema)
                 (balance-txns statements))
      :teardown-sql (schema->teardown-sql schema)}))
 
+;; Custom shrinking
+
+(defn deletev
+  "Deletes a single element from a vector."
+  [v i]
+  (into (subvec v 0 i)
+        (subvec v (inc i))))
+
+(defn single-excisions
+  "Takes a vector of xs, and returns a vector of versions of xs, each with a
+  single element deleted. Returns nil when xs is empty."
+  [xs]
+  (let [c (count xs)]
+    (when (< 0 c)
+      ; Deleting from last to first
+      (->> (range (dec c) -1 -1)
+           (map (partial deletev xs))))))
+
+(defn part-excisions
+  "Takes a vector xs. Divides xs into n parts, and produces a lazy sequence of
+  n versions of xs, each with a single part excised. Nil if there are too few
+  xs."
+  [xs n]
+  (assert (< 1 n))
+  (let [c (count xs)]
+    ; Some of the parts will have only a single element; we return nil when
+    ; there are too many parts to signal the shift to single-excisions.
+    (when (<= (* n 2) c)
+      (let [cuts (-> (range 0 c (/ c n))
+                     (->> (mapv round))
+                     (conj c))
+            parts (->> cuts
+                       (partition 2 1)
+                       (mapv (fn part [[i i']]
+                               (subvec xs i i'))))]
+        (map (fn excise [i]
+                (reduce into (deletev parts i)))
+             (reverse (range n)))))))
+
+(defn excisions
+  "Takes a vector xs. Returns a lazy sequence of versions of xs with various
+  regions deleted, down to single-element removals."
+  ([xs]
+   (excisions xs 2))
+  ([xs part-size]
+   ; We do an explicit lazy-seq to avoid chunking on exponentially growing part
+   ; numbers
+   (lazy-seq
+     (if-let [xs' (part-excisions xs part-size)]
+       (concat xs' (excisions xs (* part-size 2)))
+       ; Ground out in individual deletions
+       (single-excisions xs)))))
+
+(defn history->rose
+  "You've got a 100,000 operation history which triggers a bug, and want to
+  find a smaller history that also reproduces it. This function takes a history
+  vector and returns a rose tree of shrunken history vectors from it.
+
+  The end of the history is meaningless: the bug happened already, and
+  executing those operations is wasted work. The first part is *also* probably
+  meaningless: all that state got overwritten by later operations. We want to
+  prune these bits *fast*. We produce a sequence of versions of the history
+  missing the first half, then back half, then first quarter, then second
+  quarter, and so on, down to individual element excisions."
+  [history]
+  (rose/make-rose history
+                  (map history->rose
+                       (excisions history))))
+
+(defn case->rose
+  "This is our custom Rose tree for shrinking a case. We only shrink the sql,
+  and leave the initial DDL intact."
+  [case]
+  (let [sql       (:sql case)
+        [ddl dml] (mapv vec (split-with (partial re-find #"^CREATE TABLE")
+                                        sql))]
+    ; We construct a rose tree of the DML, then expand each node into a case
+    ; with the DML preamble.
+    (rose/fmap (fn [dml]
+                 (assoc case :sql (into ddl dml)))
+               (history->rose dml))))
+
+(defn case->gen
+  "Turns a generated test case into a custom shrinking generator."
+  [case]
+  (-> case case->rose g/gen-pure))
+
+(defn case-size
+  "Roughly how big is a case?"
+  [case]
+  (str (-> case :sql count)
+       " ops"))
+
+(defn qc-report
+  "A reporter fn to log quickcheck output."
+  [{:keys [type pass? args fail] :as opts}]
+  (case type
+    :trial
+    (info "QC pass" (case-size (first args)))
+
+    :failure
+    (info "QC fail" (case-size (first fail)))
+
+    :shrink-step
+    (info "QC shrink" (if (:pass? (:shrinking opts)) "pass" "fail")
+          (case-size (first (:args (:shrinking opts)))))
+    nil))
+
 (defn qc!
-  "Runs quick-check, drawing IDs from the `last-id` atom, with the given
-  options passed to `gen-case`. Returns quickcheck output."
-  [n opts queue last-id]
+  "Runs quick-check on a case from the given generator, drawing IDs from the
+  `last-id` atom. Returns quickcheck output."
+  [n seed gen queue last-id]
   (let [checked
         (tc/quick-check
           n
-          (prop/for-all [case (gen-case opts)]
+          (prop/for-all [case gen]
                         (let [result  (promise)
                               id      (swap! last-id inc)
                               case    (assoc case
@@ -666,9 +776,60 @@
                           ; Send case to generator
                           (swap! queue conj case)
                           ; Is it interesting?
-                          (not (= :interesting (:status @result))))))]
+                          (not (= :interesting (:status @result)))))
+          :seed seed
+          :reporter-fn qc-report)]
     (info "Test.check pass completed:\n"
           (with-out-str (pprint checked)))
+    checked))
+
+(defn worker-pass-1!
+  "The first pass of our hunt: we generate increasingly large schemas, looking
+  for bugs. Returns a test.check map."
+  [test-opts last-id queue]
+  ; We are *very* bad at shrinking schemas (for the usual test.check
+  ; bind reasons), so we build a loop that gradually expands the
+  ; schemas over time.
+  (info "Pass 1: standard test.check search")
+  (loop [max-table-count 1
+         max-column-count 1]
+    (info "Trying up to"
+          max-table-count "tables and"
+          max-column-count "columns")
+    (let [checked (qc! (:test-cases test-opts)
+                       (:seed test-opts)
+                       (gen-case
+                         {:max-table-count  max-table-count
+                          :max-column-count max-column-count})
+                       queue
+                       last-id)]
+      (cond ; Found a bug!
+            (false? (:pass? checked))
+            checked
+
+            ; No bugs, and our schemas are large; give up
+            (and (< 4 max-table-count)
+                 (< 5 max-column-count))
+            checked
+
+            ; Let's keep hunting. Start off by adding a column
+            (= 1 max-column-count)
+            (recur max-table-count (inc max-column-count))
+
+            ; When we get to n columns and n tables, start over
+            ; with more tables.
+            (= max-table-count max-column-count)
+            (recur (inc max-table-count) 1)))))
+
+(defn worker-pass-2!
+  "The second pass of our hunt. We take an existing test case, construct a
+  generator from it, and throw it back into test.check."
+  [test-opts case last-id queue]
+  (info "Pass 2: custom shrinking case of" (count (:sql case)) "operations")
+  (let [checked (qc! 10 (:seed test-opts) (case->gen case) queue last-id)]
+    (if-let [smallest (first (:smallest (:shrunk checked)))]
+      (info "Pass 2: shrunk to" (case-size smallest))
+      (info "Pass 2: did not shrink"))
     checked))
 
 (defn worker
@@ -682,41 +843,11 @@
   (future
     (util/with-thread-name "jepsen test.check"
       (try
-        (info "Starting test.check")
-          ; We are *very* bad at shrinking schemas (for the usual test.check
-          ; bind reasons), so we build a loop that gradually expands the
-          ; schemas over time.
-          (loop [max-table-count 1
-                 max-column-count 1]
-            (info "Trying up to"
-                  max-table-count "tables and"
-                  max-column-count "columns")
-            (let [checked (qc! (:test-cases test-opts)
-                               {:max-table-count  max-table-count
-                                :max-column-count max-column-count}
-                               queue
-                               last-id)]
-              (if (:pass? checked)
-                (cond ; Start off by adding a column
-                      (= 1 max-column-count)
-                      (recur max-table-count (inc max-column-count))
-
-                      ; When we get to n columns and n tables, start over
-                      ; with more tables.
-                      (= max-table-count max-column-count)
-                      (recur (inc max-table-count) 1))
-                ; Done
-                checked)))
-          ; Re-run with the interesting case.
-          ;(when-let [case (-> checked :shrunk :smallest first)]
-          ;  (let [result (promise)]
-          ;    (swap! queue conj
-          ;           (assoc case
-          ;                  :result result
-          ;                  :final? true))
-          ;    @result))
-          ; And done
-          (swap! queue conj :stop)
+        (let [checked (worker-pass-1! test-opts last-id queue)]
+          (when-let [smallest (first (:smallest (:shrunk checked)))]
+            (worker-pass-2! test-opts smallest last-id queue)))
         (catch Throwable t
           (warn t "Jepsen test.check worker crashed!")
-          (throw t))))))
+          (throw t))
+        (finally
+          (swap! queue conj :stop))))))
