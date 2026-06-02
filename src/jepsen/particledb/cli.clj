@@ -285,6 +285,10 @@
       :parse-fn parse-long
       :validate [pos? "Must be a positive number."]]
 
+     [nil "--particledb-port NUMBER" "What port should we connect to when talking to the ParticleDB interface?"
+      :default 5440
+      :parse-fn parse-long]
+
      [nil "--postgres-password PASS" "What password should we use to connect to postgres?"
       :default "jepsenpw"]
 

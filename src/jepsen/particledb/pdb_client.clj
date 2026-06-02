@@ -20,7 +20,7 @@
         ; for this nonsense...
         :classname "org.particledb.Driver"
         :host node
-        :port (:postgres-port test)}
+        :port (:particledb-port test 5440)}
        j/get-datasource
        j/get-connection))
 
