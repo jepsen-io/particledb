@@ -730,9 +730,11 @@
         [ddl dml] (mapv vec (split-with (partial re-find #"^CREATE TABLE")
                                         sql))]
     ; We construct a rose tree of the DML, then expand each node into a case
-    ; with the DML preamble.
+    ; with the DML preamble, and ensure transactions are closed.
     (rose/fmap (fn [dml]
-                 (assoc case :sql (into ddl dml)))
+                 (->> (into ddl dml)
+                      (balance-txns)
+                      (assoc case :sql)))
                (history->rose dml))))
 
 (defn case->gen
