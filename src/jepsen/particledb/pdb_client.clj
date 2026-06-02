@@ -31,8 +31,11 @@
     (condp identical? (class e)
       SQLException
       (condp re-find m
-        #"duplicate key value" {:type :duplicate
-                                :definite? true}
+        #"could not serialize access"
+        {:type :could-not-serialize, :msg m, :definite? true}
+
+        #"duplicate key value"
+        {:type :duplicate, :definite? true}
         nil)
       nil)))
 
