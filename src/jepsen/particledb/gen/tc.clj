@@ -591,7 +591,8 @@
   (g/frequency [[8  (gen-select schema)]
                 [8  (gen-insert schema)]
                 [4  (gen-update schema)]
-                [1  (gen-delete schema)]]))
+                [1  (gen-delete schema)]
+                [2  (g/elements ["BEGIN" "COMMIT" "ROLLBACK"])]]))
 
 (defn id-gen
   "A generator which draws unique IDs from an atom containing an integer. This

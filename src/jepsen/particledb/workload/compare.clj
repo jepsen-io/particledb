@@ -44,7 +44,9 @@
     (catch (:type %) e
       e)
     (catch PSQLException e
-      {:type :psql-error, :msg (.getMessage e)})))
+      {:type :psql-error, :msg (.getMessage e)})
+    (catch IllegalStateException e
+      {:type :illegal-state-exception, :msg (.getMessage e)})))
 
 (defn equiv-double?
   "Floating-point equivalence. We allow a small difference between results, and
