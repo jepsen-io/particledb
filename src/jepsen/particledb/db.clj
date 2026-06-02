@@ -46,7 +46,8 @@
   (c/su
     ; ParticleDB logs ANSI color sequences to stdout/stderr, so we have to
     ; filter those out to get readable logs
-    (debian/install ["ansifilter"])
+    (debian/install ["ansifilter"
+                     "postgresql-client"])
     (c/exec :mkdir :-p dir)
     (let [version (:version test)]
       (if (.exists (io/file version))
@@ -128,7 +129,8 @@
          :--no-auth
          (when-let [m (:wal-sync-mode test)] [:--wal-sync-mode (name m)])
          (when-let [m (:txn-mode test)]      [:--txn-mode      (name m)])
-         ; This makes it deeply frustrating to debug
+         ; This makes it deeply frustrating to debug because we constantly have
+         ; connections closing. Also I don't think this option does  anything.
          :--connection-timeout 10000
          :--max-connections 16384))))
 
