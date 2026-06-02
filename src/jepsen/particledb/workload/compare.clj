@@ -69,8 +69,16 @@
               scale (Math/max (Math/abs a) (Math/abs b))
               ; Unit in last place
               ulp (Math/ulp scale)]
-          (<= (- (Math/abs a) (Math/abs b))
-              (* ulp 2)))))
+          ; Sigh. This is the *precise* way to do it, but ParticleDB stores
+          ; reals as 64-bit floats, so, uh... let's let things be extremely
+          ; sloppy.
+          (<= (Math/abs (- a b))
+              (* ulp 2))
+          ; Much looser
+          (<= (/ (Math/abs (- a b)) scale)
+              1/1024)
+              )))
+
 
 (defn equiv?
   "Are the given values equivalent?"
@@ -290,10 +298,11 @@
 
 ; Our client is fairly simple: it takes a vector of SQL strings, runs them on
 ; both clients, and returns vectors of their results.
-(defrecord Client [pg pdb]
+(defrecord Client [node pg pdb]
   client/Client
   (open! [this test node]
     (assoc this
+           :node node
            :pg  (pgc/open {:postgres-user "postgres"
                            :postgres-password "pw"}
                           node)
@@ -305,38 +314,49 @@
 
   (invoke! [this test op]
     (binding [sqlc/*error-fn* pgc/error-fn]
-      (let [test-case (:value op)
-            id        (:id test-case)
-            sql' (mapv (fn [sql]
-                         ; Replace tables like <t> with t_123
-                         (let [sql' (gen.tc/mangle-table-str id sql)]
-                           {:sql sql
-                            :pg  (execute! pg [sql'])
-                            :pdb (execute! pdb [sql'])}))
-                       (:sql test-case))
-            status (if (every? equiv-mop? sql')
-                     :valid
-                     :interesting)
-            ; What kind of bug is this?
-            origin (when (= :interesting status)
-                     (origin sql'))
-            ; We only want those matched by --compare-origin
-            status (if (and (= :interesting status)
-                            (or (nil? origin)
-                                (re-find (:compare-origin test) origin)))
-                     :interesting
-                     :valid)]
-        ; Try to politely clean up
-        (if (= status :valid)
-          (doseq [sql (:teardown-sql test-case)]
-            (execute! pg [sql])
-            (execute! pdb [sql])))
-        (assoc op
-               :type :ok
-               :value (cond-> (assoc (:value op)
-                                     :sql    sql'
-                                     :status status)
-                        (= :interesting status) (assoc :origin origin))))))
+      ; I suspect that despite my best efforts, state (BEGIN...COMMIT)? might
+      ; be leaking between successive ops on the same client, so let's be EXTRA
+      ; careful.
+      (let [pg  (pgc/open {:postgres-user "postgres"
+                           :postgres-password "pw"}
+                          node)
+            pdb (pgc/open test node)]
+        (try
+          (let [test-case (:value op)
+                id        (:id test-case)
+                sql' (mapv (fn [sql]
+                             ; Replace tables like <t> with t_123
+                             (let [sql' (gen.tc/mangle-table-str id sql)]
+                               {:sql sql
+                                :pg  (execute! pg [sql'])
+                                :pdb (execute! pdb [sql'])}))
+                           (:sql test-case))
+                status (if (every? equiv-mop? sql')
+                         :valid
+                         :interesting)
+                ; What kind of bug is this?
+                origin (when (= :interesting status)
+                         (origin sql'))
+                ; We only want those matched by --compare-origin
+                status (if (and (= :interesting status)
+                                (or (nil? origin)
+                                    (re-find (:compare-origin test) origin)))
+                         :interesting
+                         :valid)]
+            ; Try to politely clean up
+            (if (= status :valid)
+              (doseq [sql (:teardown-sql test-case)]
+                (execute! pg [sql])
+                (execute! pdb [sql])))
+            (assoc op
+                   :type :ok
+                   :value (cond-> (assoc (:value op)
+                                         :sql    sql'
+                                         :status status)
+                            (= :interesting status) (assoc :origin origin))))
+          (finally
+            (sqlc/close-conn! pg)
+            (sqlc/close-conn! pdb))))))
 
   (teardown! [this test])
 
@@ -1065,6 +1085,6 @@
                                   (:compare-max-statement-count opts)}
                                  last-id
                                  queue)]
-    {:client    (Client. nil nil)
+    {:client    (Client. nil nil nil)
      :generator (hegel-gen queue)
      :checker   (Checker.)}))
