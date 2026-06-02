@@ -25,6 +25,7 @@
             [next.jdbc :as j]
             [next.jdbc.result-set :as rs])
   (:import (clojure.lang Keyword
+                         MapEntry
                          PersistentArrayMap
                          PersistentVector
                          PersistentQueue)
@@ -107,6 +108,10 @@
 
           String
           (= a b)
+
+          MapEntry
+          (and (= (key a) (key b))
+               (equiv? (val a) (val b)))
 
           PersistentArrayMap
           (and (= (count a) (count b))
@@ -219,7 +224,7 @@
                    #"filter predicate must produce boolean"
                    "filter predicate must produce boolean"
 
-                   ; Weirdly ParticleDB isn't OK comparing Boolean with Null...
+                   ; Weirdly ParticleDB isn't OK comparing Boolean with Null.
                    ; sometimes, even when PG is fine. Weird.
                    #"Invalid comparison operation"
                    "invalid comparison"
@@ -287,14 +292,13 @@
   (invoke! [this test op]
     (binding [sqlc/*error-fn* pgc/error-fn]
       (let [test-case (:value op)
-            ; Tear down first
-            _ (doseq [sql (:teardown-sql test-case)]
-                (execute! pg [sql])
-                (execute! pdb [sql]))
+            id        (:id test-case)
             sql' (mapv (fn [sql]
-                         {:sql sql
-                          :pg  (execute! pg [sql])
-                          :pdb (execute! pdb [sql])})
+                         ; Replace tables like <t> with t_123
+                         (let [sql' (gen.tc/mangle-table-str id sql)]
+                           {:sql sql
+                            :pg  (execute! pg [sql'])
+                            :pdb (execute! pdb [sql'])}))
                        (:sql test-case))
             status (if (every? equiv-mop? sql')
                      :valid
@@ -939,20 +943,6 @@
       (str/replace "\n" (str "\n" indent))
       (str/replace #"[\n\s]*$" "")))
 
-(defn condense-sql
-  "Condenses a single SQL statement; see condense-case."
-  [sql-str]
-  (str/replace sql-str #" ([tuv])_\d+([ \;\,]|\Z)" " $1$2"))
-
-(defn condense-op
-  "Rewrites an operation so that it is easier to understand and explore
-  interactively. Rewrites table names (e.g. 't_123') as simply 't'."
-  [op]
-  (update-in op [:value :sql]
-             (fn [statements]
-               (mapv #(update % :sql condense-sql)
-                     statements))))
-
 (defn op-size
   "Roughly how 'big' is an operation? We use this to find small counterexamples
   to print out."
@@ -972,7 +962,7 @@
                 origin " " id ".txt")
       ; First, step-by-step with results.
       (doseq [{:keys [sql pg pdb] :as mop} sql]
-        (print sql)
+        (print (gen.tc/mangle-table-str id sql))
         (println ";")
         (if (equiv-mop? mop)
           (println (indented-pprint-str "  " pdb))
@@ -987,8 +977,8 @@
       (println)
       (println "# Condensed case")
       (println)
-      (doseq [{:keys [sql]} (:sql (:value (condense-op op)))]
-        (print sql)
+      (doseq [{:keys [sql]} (:sql (:value op))]
+        (print (gen.tc/mangle-table-str nil sql))
         (println ";")))))
 
 (defrecord Checker []

@@ -11,6 +11,28 @@
             [dom-top.core :refer [loopr]]
             [jepsen [util :as util]]))
 
+
+;; Table mangling
+
+(def table-start
+  "A special character we use to identify the start of a table name."
+  "\uF8FE")
+
+(def table-end
+  "A special character we use to identify the end of a table name."
+  "\uF8FF")
+
+(def table-pattern
+  "A pattern to match a table."
+  (re-pattern (str table-start "(.+?)" table-end)))
+
+(defn mangle-table-str
+  "Rewrites an sql strings's tables to include an (optional) id suffix."
+  [id s]
+  (str/replace s table-pattern (if id
+                                 (str "$1_" id)
+                                 "$1")))
+
 ;; General generators
 
 (defn probability
@@ -63,7 +85,9 @@
 
 (def table-names
   "All table names, as a vector."
-  ["t" "u" "v"])
+  (mapv (fn [name]
+          (str table-start name table-end))
+        ["t" "u" "v"]))
 
 (def all-types-vec
   "All possible types, in order for shrinking."
@@ -123,7 +147,12 @@
          (name type))
        (when not-null? " NOT NULL")
        (when unique? " UNIQUE")
-       (when primary-key? " PRIMARY KEY")))
+       (when primary-key? " PRIMARY KEY")
+       (when (#{:text} type)
+         ; I think they're using the C collation even over utf8 columns?
+         ; Oh, you *can't* create collated columns in ParticleDB. Sigh.
+         ;" COLLATE \"pg_c_utf8\""
+         )))
 
 (defn remove-duplicate-primary-keys
   "Takes a vector of columns and limits them to just one primary key."
@@ -179,8 +208,6 @@
 (defn gen-schema
   "Generates a schema. A schema is a vector of table schemas. Options:
 
-      :id The unique integer ID for this schema. We use this to choose unique
-          table names.
       :max-table-count  The maximum number of tables
       :max-column-count The maximum number of columns"
   [opts]
@@ -189,8 +216,6 @@
        (bind (fn [[table-count table-names]]
                (->> table-names
                     (take table-count)
-                    (mapv (fn uniquify [table-name]
-                            (str table-name "_" (:id opts))))
                     (mapv (partial gen-table-schema opts))
                     (apply g/tuple))))))
 
@@ -594,19 +619,22 @@
                 [1  (gen-delete schema)]
                 [2  (g/elements ["BEGIN" "COMMIT" "ROLLBACK"])]]))
 
-(defn id-gen
-  "A generator which draws unique IDs from an atom containing an integer. This
-  is a stupid hack but I don't know how else to do it."
-  [id-atom]
-  (g/fmap (fn [_]
-            (swap! id-atom inc))
-    (g/return nil)))
+(defn balance-txns
+  "Adds commits for all open transactions in a sequence of statements."
+  [statements]
+  (loopr [depth 0]
+         [sql statements]
+         (case sql
+           "BEGIN"    (recur (inc depth))
+           "COMMIT"   (recur (max 0 (dec depth)))
+           "ROLLBACK" (recur (max 0 (dec depth)))
+           (recur depth))
+         (into statements
+               (repeat depth "COMMIT"))))
 
 (defn gen-case
-  "Generates a test case for a unique integer ID, drawn from `id-atom`. A case
-  is a map of:
+  "Generates a test case: a map of:
 
-      :id           A unique integer id
       :sql          A vector of SQL statements
       :teardown-sql A vector of SQL statements to tear down what this made.
 
@@ -614,29 +642,23 @@
 
       :max-table-count  The maximum number of tables
       :max-column-count The maximum number of columns"
-  [opts id-atom]
-  (g/let [id          (id-gen id-atom)
-          schema      (gen-schema (assoc opts :id (swap! id-atom inc)))
+  [opts]
+  (g/let [schema      (gen-schema opts)
           statements  (g/vector (gen-statement schema) 1 1024)]
-    {:id id
-     :sql (into (schema->create-sql schema)
-                statements)
+    {:sql (into (schema->create-sql schema)
+                (balance-txns statements))
      :teardown-sql (schema->teardown-sql schema)}))
 
 (defn qc!
   "Runs quick-check, drawing IDs from the `last-id` atom, with the given
   options passed to `gen-case`. Returns quickcheck output."
-  [n opts queue id- last-id]
+  [n opts queue last-id]
   (let [checked
         (tc/quick-check
           n
-          (prop/for-all [case (gen-case opts last-id)]
+          (prop/for-all [case (gen-case opts)]
                         (let [result  (promise)
-                              id      (:id case)
-                              id      (if (= id @id-)
-                                        (swap! last-id inc)
-                                        id)
-                              _       (vreset! id- id)
+                              id      (swap! last-id inc)
                               case    (assoc case
                                              :id     id
                                              :final? false
@@ -661,10 +683,6 @@
     (util/with-thread-name "jepsen test.check"
       (try
         (info "Starting test.check")
-        (let [; Ugh I cannot for the life of me figure out how to thread a
-              ; unique ID reliably through test.check's machinery. This is an
-              ; overlapping hack to make SURE we get unique IDs.
-              id- (volatile! nil)]
           ; We are *very* bad at shrinking schemas (for the usual test.check
           ; bind reasons), so we build a loop that gradually expands the
           ; schemas over time.
@@ -677,7 +695,6 @@
                                {:max-table-count  max-table-count
                                 :max-column-count max-column-count}
                                queue
-                               id-
                                last-id)]
               (if (:pass? checked)
                 (cond ; Start off by adding a column
@@ -699,7 +716,7 @@
           ;                  :final? true))
           ;    @result))
           ; And done
-          (swap! queue conj :stop))
+          (swap! queue conj :stop)
         (catch Throwable t
           (warn t "Jepsen test.check worker crashed!")
           (throw t))))))
