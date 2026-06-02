@@ -177,4 +177,5 @@
   [opts]
   (if (#{:compare} (:workload opts))
     (JointDB. (pg/db {})
-              (db opts))))
+              (db opts))
+    (db opts)))
