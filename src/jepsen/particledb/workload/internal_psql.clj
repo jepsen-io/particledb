@@ -90,7 +90,7 @@
   "Runs an SQL string and returns results."
   [test sql]
   (let [stream (slow-stream test sql)
-        res (-> {:cmd (->> ["psql" "-h" "localhost"]
+        res (-> {:cmd (->> ["psql" "-h" "localhost" "-p" (:postgres-port test)]
                            (map c/escape)
                            (str/join " "))
                  :in stream}
