@@ -119,3 +119,44 @@
             [0 2 3 4 5 6 7 8]
             [1 2 3 4 5 6 7 8]]
            (excisions v)))))
+
+(defn rose->data
+  "Converts a rose tree to a seq of [head ... children ...]"
+  [rose]
+  (cons (rose/root rose) (map rose->data (rose/children rose))))
+
+(deftest history->rose-test
+  (let [t (history->rose [0 1 2 3 4 5 6 7])]
+    ;(pprint (rose->data t))
+    ; First the whole vector
+    (is (= [0 1 2 3 4 5 6 7] (rose/root t)))
+    ; Then the excisions at various scales, starting with the biggest cuts
+    (is (= [; Chunks of four
+            [0 1 2 3]
+            [4 5 6 7]
+            ; Chunks of two
+            [0 1 2 3 4 5]
+            [0 1 2 3 6 7]
+            [0 1 4 5 6 7]
+            [2 3 4 5 6 7]
+            ; Individual elements
+            [0 1 2 3 4 5 6]
+            [0 1 2 3 4 5 7]
+            [0 1 2 3 4 6 7]
+            [0 1 2 3 5 6 7]
+            [0 1 2 4 5 6 7]
+            [0 1 3 4 5 6 7]
+            [0 2 3 4 5 6 7]
+            [1 2 3 4 5 6 7]]
+            (map rose/root (rose/children t))))
+    ; If we take the [4 5 6 7] branch, we get:
+    (let [t (-> t rose/children (nth 1))]
+      (is (= [4 5 6 7] (rose/root t)))
+      (is (= [[4 5]
+              [6 7]
+              [4 5 6]
+              [4 5 7]
+              [4 6 7]
+              [5 6 7]]
+              (map rose/root (rose/children t)))))
+    ))

@@ -1046,7 +1046,9 @@
         ;               last-id
         ;               queue)]
         tc-worker (gen.tc/worker {:test-cases 10000
-                                  :seed (rand/long)}
+                                  :seed (rand/long)
+                                  :max-statement-count
+                                  (:compare-max-statement-count opts)}
                                  last-id
                                  queue)]
     {:client    (Client. nil nil)

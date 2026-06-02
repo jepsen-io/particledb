@@ -244,6 +244,11 @@
       :parse-fn re-pattern
       :default #""]
 
+     [nil "--compare-max-statement-count COUNT" "The maximum number of DML statements generated in a single compare history."
+      :default  64
+      :parse-fn parse-long
+      :validate [pos? "Must be positive"]]
+
      [nil "--corrupt-file-type TYPE" "What kind of files to corrupt. See nemesis/file-types."
       :parse-fn keyword
       :validate [nemesis/file-types (cli/one-of nemesis/file-types)]]

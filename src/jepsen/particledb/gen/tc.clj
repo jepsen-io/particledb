@@ -642,11 +642,13 @@
 
   Options are:
 
+      :max-statement-count  The maximum number of statements
       :max-table-count  The maximum number of tables
       :max-column-count The maximum number of columns"
   [opts]
   (g/let [schema      (gen-schema opts)
-          statements  (g/vector (gen-statement schema) 1 64)]
+          statements  (g/vector (gen-statement schema) 1
+                                (:max-statement-count opts))]
     {:sql (into (schema->create-sql schema)
                 (balance-txns statements))
      :teardown-sql (schema->teardown-sql schema)}))
@@ -803,7 +805,11 @@
 
 (defn worker-pass-1!
   "The first pass of our hunt: we generate increasingly large schemas, looking
-  for bugs. Returns a test.check map."
+  for bugs. Returns a test.check map. Options:
+
+      :max-statement-count  The maximum number of statements
+      :max-table-count  The maximum number of tables
+      :max-column-count The maximum number of columns"
   [opts last-id queue]
   ; We are *very* bad at shrinking schemas (for the usual test.check
   ; bind reasons), so we build a loop that gradually expands the
@@ -816,8 +822,9 @@
           max-column-count "columns")
     (let [checked (qc! opts
                        (gen-case
-                         {:max-table-count  max-table-count
-                          :max-column-count max-column-count})
+                         (assoc opts
+                                :max-table-count  max-table-count
+                                :max-column-count max-column-count))
                        queue
                        last-id)]
       (cond ; Found a bug!
@@ -857,7 +864,10 @@
       :pool           The atom tracking origin worker state
       :target-origin  The origin we're trying to find
       :test-cases     The number of test cases to run
-      :seed           The random seed"
+      :seed           The random seed
+      :max-statement-count  The maximum number of statements
+      :max-table-count  The maximum number of tables
+      :max-column-count The maximum number of columns"
   [{:keys [pool target-origin] :as opts} last-id queue]
   ; Check whether anyone else is looking for this
   (let [[pool0] (swap-vals! pool (fn [pool]
@@ -891,6 +901,9 @@
 
       :test-cases The number of test cases to run
       :seed       The random seed
+      :max-statement-count  The maximum number of statements
+      :max-table-count  The maximum number of tables
+      :max-column-count The maximum number of columns
 
   This worker manages other workers; it will spawn a series of origin workers
   to chase down each unique origin it finds."
