@@ -49,7 +49,11 @@ in `jepsen.particledb/builds/1.1.4`. Copy the test harness directory from your
 local machine to the EC2 node like so:
 
 ```sh
-rsync -avz --delete-after --hard-links --exclude jepsen.particledb/target --exclude jepsen.particledb/store jepsen.particledb admin@SOME_EC2_DNS_ADDRESS.compute-1.amazonaws.com:
+rsync -avz --delete-after --hard-links \
+  --exclude jepsen.particledb/target \
+  --exclude jepsen.particledb/store \
+  jepsen.particledb \
+  admin@SOME_EC2_DNS_ADDRESS.compute-1.amazonaws.com:
 ```
 
 Then log into the EC2 node via SSH:
