@@ -266,6 +266,10 @@
                    #"unsupported .+ operator"
                    "unsupported operator"
 
+                   ; Oh *neat*
+                   #"internal error"
+                   "internal error"
+
                    "unknown particledb error")
 
                  ; We got results, but... they differed
