@@ -6,7 +6,7 @@
 ssh n1 bash -c "'killall -9 particledb; mkdir -p /opt/particledb'" &&
 scp $1 n1:/opt/particledb/particledb &&
 ssh n1 bash -c "'cd /opt/particledb; \
-  rm -f daemon.log; \
+  rm -rf daemon.log data; \
   start-stop-daemon --start \
   --chdir /opt/particledb \
   --background \
