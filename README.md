@@ -56,12 +56,14 @@ Then log into the EC2 node via SSH:
 ssh admin@SOME_EC2_ADDRESS.compute-1.amazonaws.com
 ```
 
-Then run some tests using the binary that you placed in the `builds` directory:
+Then run some tests using the binary that you placed in the `builds` directory.
+If you're running in Cloudformation, use `--username admin --node n1`; if
+you're using a single VM with containers, use `--node `c1`.
 
 ```sh
 cd jepsen.particledb
 lein run test-all \
-  -n c1 \
+  --node c1 \
   --version builds/1.1.16 \
   --no-lazyfs \
   --nemesis none \
