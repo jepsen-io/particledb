@@ -74,6 +74,8 @@
       (db/setup! lazyfs test node))
 
     (db/start! this test node)
+    (cu/await-tcp-port (:particledb-port test)
+                       {:log-interval 10000})
     (cu/await-tcp-port (:postgres-port test)
                        {:log-interval 10000}))
 
