@@ -31,22 +31,16 @@ manager](https://docs.astral.sh/uv/), for the Hegel generative testing library. 
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-## Running on AWS clusters
+## Walkthrough
 
-With the [AWS Marketplace Jepsen
-product](https://aws.amazon.com/marketplace/pp/prodview-ykhheuyq5qdnq) (see
-your Marketplace subscriptions list
-[here](https://us-east-1.console.aws.amazon.com/marketplace/subscriptions/))
-click "Launch new instance", then choose "Amazon EC2", and "Launch from EC2 Console". Choose version 0.3.11 and click "Launch from EC2".
+To start an AWS cluster, see Jepsen's [AWS cluster
+instructions](https://github.com/jepsen-io/jepsen#aws).
 
-Pick your favorite instance type (an m8i.xlarge should work fine), set the root
-volume storage to something reasonable--say 64 GB, and click "Launch Instance".
-Click the instance ID in the green notification that pops up, and copy the
-"Public DNS" address of the instance.
-
-Ensure you have a ParticleDB x68_64 binary in this test harness directory; say,
-in `jepsen.particledb/builds/1.1.4`. Copy the test harness directory from your
-local machine to the EC2 node like so:
+For the last few weeks the ParticleDB version-specific downloads have been
+unavailable, so you'll need to ensure you have a ParticleDB x68_64 binary in
+this test harness directory. I name mine after the versions, like
+`jepsen.particledb/builds/1.1.4`. Once you have a binary, copy the test harness
+directory from your local machine to the EC2 node like so:
 
 ```sh
 rsync -avz --delete-after --hard-links \
@@ -60,13 +54,6 @@ Then log into the EC2 node via SSH:
 
 ```ssh
 ssh admin@SOME_EC2_ADDRESS.compute-1.amazonaws.com
-```
-
-On that node, start a virtual cluster using Linux containers, and install a few prerequisites:
-
-```sh
-jepsen-containers-start &&
-scripts/setup.sh
 ```
 
 Then run some tests using the binary that you placed in the `builds` directory:
