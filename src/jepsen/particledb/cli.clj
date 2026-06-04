@@ -358,6 +358,7 @@
                       [false true]
                       [l]))
         txn-modes (if-let [t (:txn-mode opts)] [t] (sort txn-modes))
+        wal-modes (if-let [w (:wal-sync-mode opts)] [w] (sort wal-sync-modes))
         cfts        (let [cft (:corrupt-file-type opts)]
                       (if (nil? cft)
                         (keys nemesis/file-types)
@@ -369,12 +370,14 @@
                   cfts
                   [nil])
           t     txn-modes
+          wm    wal-modes
           w     workloads]
       (particledb-test (-> opts
                            (assoc :lazyfs             l
                                   :nemesis            n
                                   :corrupt-file-type  ft
                                   :txn-mode           t
+                                  :wal-sync-mode      wm
                                   :workload           w))))))
 (defn opt-fn!
   "Post-processes CLI options. As a side effect, we initialize the RNG here."
