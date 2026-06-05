@@ -343,7 +343,7 @@
       :validate [txn-modes (cli/one-of txn-modes)]]
 
      ["-w" "--workload NAME" "What workload should we run?"
-      :default  :append
+      :default  :append-pdb
       :parse-fn keyword
       :validate [workloads (cli/one-of workloads)]]
      ]))
