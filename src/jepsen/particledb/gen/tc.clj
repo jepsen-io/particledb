@@ -148,9 +148,7 @@
          :double "double precision"
          (name type))
        (when (#{:text} type)
-         ; I think they're using the C collation even over utf8 columns?
-         ; Oh, you *can't* create collated columns in ParticleDB. Sigh.
-         " COLLATE pg_c_utf8")
+         " COLLATE unicode")
        (when not-null? " NOT NULL")
        (when unique? " UNIQUE")
        (when primary-key? " PRIMARY KEY")
