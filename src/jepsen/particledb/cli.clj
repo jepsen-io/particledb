@@ -340,7 +340,7 @@
 
      [nil "--wal-sync-mode MODE" "The WAL sync mode for ParticleDB"
       :parse-fn keyword
-      :validate [txn-modes (cli/one-of txn-modes)]]
+      :validate [wal-sync-modes (cli/one-of wal-sync-modes)]]
 
      ["-w" "--workload NAME" "What workload should we run?"
       :default  :append-pdb
