@@ -38,6 +38,9 @@
         #"could not serialize access"
         {:type :could-not-serialize, :msg m, :definite? true}
 
+        #"current transaction is aborted, commands ignored"
+        {:type :aborted, :msg m, :definite? true}
+
         #"duplicate key value"
         {:type :duplicate, :definite? true}
         nil)
