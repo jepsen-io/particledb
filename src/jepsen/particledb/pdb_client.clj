@@ -8,7 +8,8 @@
             [jepsen [sql :as sql]]
             [next.jdbc :as j]
             [next.jdbc.result-set :as rs])
-  (:import (java.sql SQLException)
+  (:import (clojure.lang ExceptionInfo)
+           (java.sql SQLException)
            (org.particledb Driver)))
 
 (defn open
@@ -40,6 +41,15 @@
         #"duplicate key value"
         {:type :duplicate, :definite? true}
         nil)
+
+      ExceptionInfo
+      (let [data (ex-data e)]
+        (cond (re-find #"Rollback failed handling" m)
+              ; Ah, let's look at the root cause
+              (recur (:handling data))
+
+              true
+              nil))
       nil)))
 
 (def workloads
