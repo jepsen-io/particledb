@@ -15,7 +15,7 @@
                     [random :as rand]
                     [sql :as sql]
                     [tests :as tests]
-                    [util :as util]]
+                    [util :as util :refer [default]]]
             [jepsen.particledb [db :as db]
                                [nemesis :as nemesis]
                                [pdb-client :as pdb-client]]
@@ -31,6 +31,40 @@
 (def txn-modes
   "The set of txn modes supported by ParticleDB"
   #{:fast :occ-v3 :zero-copy-occ, :serializable-ssi, :table-2pl})
+
+(defn expected-consistency-model
+  "What consistency level do we expect for a given transaction mode and wal
+  sync mode?"
+  [{:keys [txn-mode wal-sync-mode]}]
+  (cond ; In fast txn mode, they start listing allowed anomalies at P4 and A5A,
+        ; and also say that "no dirty reads", so I think we should be at...
+        ; read committed? Maybe MAV? SI is out, not sure about causal.
+        (= txn-mode :fast)
+        :monotonic-atomic-view
+
+        ; Having ruled out `fast`, we're supposed to be at *least* SI. But if
+        ; we're running without sync, then we should expect some transactions
+        ; to be lost on power failure. But! We should not, I think, expect G0,
+        ; G1a, G1b, or G1c, and we shouldn't observe internal anomalies. I'm
+        ; guessing that might put us at... read atomic?
+        (= wal-sync-mode :nosync)
+        :read-atomic
+
+        ; OK, we're running in one of the two safe sync modes
+        true
+        (case txn-mode
+          ; They explicitly say SI, but I'm willing to bet it's actually strong
+          ; SI.
+          :occ-v3         :strong-snapshot-isolation
+          ; Ditto
+          :zero-copy-occ  :strong-snapshot-isolation
+          ; The internal docs say "not classified", which is silly;
+          ; serializable is *right there* in the name. In PG this is actually
+          ; strong-1SR, so let's try that here; if we do find realtime/process
+          ; anomalies that's at least worth discussing.
+          :serializable-ssi :strong-serializable
+          ; The internal docs explicitly claim "Strict Serializable".
+          :table-2pl        :strong-serializable)))
 
 (def workloads
   "A map of workload names to functions that take CLI options and return
@@ -141,6 +175,8 @@
   [opts]
   (let [seed (rand/long)
         _ (rand/set-seed! seed)
+        opts            (default opts :expected-consistency-model
+                          (expected-consistency-model opts))
         workload-name   (:workload opts)
         workload        ((workloads workload-name) opts)
         db              (db/joint-db opts)
@@ -253,8 +289,7 @@
       :parse-fn keyword
       :validate [nemesis/file-types (cli/one-of nemesis/file-types)]]
 
-     [nil "--expected-consistency-model MODEL" "What level of isolation do we *expect* to observe? Defaults to strong-serializable."
-      :default :strong-serializable
+     [nil "--expected-consistency-model MODEL" "What level of isolation do we *expect* to observe? Defaults are chosen based on wal-sync-mode and txn-mode."
       :parse-fn keyword]
 
      [nil "--final-time-limit SECONDS" "How long should we run the final generator for, at most? In seconds."
@@ -357,7 +392,13 @@
                     (if (nil? l)
                       [false true]
                       [l]))
-        txn-modes (if-let [t (:txn-mode opts)] [t] (sort txn-modes))
+        txn-modes (if-let [t (:txn-mode opts)]
+                    [t]
+                    (->> txn-modes
+                         ; We sort of expect fast to be a tire fire; I'm not
+                         ; even sure how to go about testing it.
+                         (remove #{:fast})
+                         (sort)))
         wal-modes (if-let [w (:wal-sync-mode opts)] [w] (sort wal-sync-modes))
         cfts        (let [cft (:corrupt-file-type opts)]
                       (if (nil? cft)
@@ -381,10 +422,10 @@
                                   :workload           w))))))
 (defn opt-fn!
   "Post-processes CLI options. As a side effect, we initialize the RNG here."
-  [opts]
-  (when-let [seed (:seed (:options opts))]
+  [{:keys [options] :as parsed}]
+  (when-let [seed (:seed options)]
     (rand/set-seed! seed))
-  opts)
+  parsed)
 
 (defn -main
   "Handles command line arguments. Can either run a test, or a web server for
