@@ -1,11 +1,13 @@
 #!/bin/bash
 
 # A quick helper for standing up a single ParticleDB instance of the given
-# local binary on `n1`.
+# local binary on `n9`.
 
-ssh n1 bash -c "'killall -9 particledb; mkdir -p /opt/particledb'" &&
-scp $1 n1:/opt/particledb/particledb &&
-ssh n1 bash -c "'cd /opt/particledb; \
+HOST=n9
+
+ssh $HOST bash -c "'killall -9 particledb; mkdir -p /opt/particledb'" &&
+scp $1 $HOST:/opt/particledb/particledb &&
+ssh $HOST bash -c "'cd /opt/particledb; \
   rm -rf daemon.log data; \
   start-stop-daemon --start \
   --chdir /opt/particledb \
@@ -21,4 +23,4 @@ ssh n1 bash -c "'cd /opt/particledb; \
   ; \
   while ! echo exit | nc -z localhost 15432; do sleep 0.5; done;
   '" &&
-ssh n1 -t psql --host localhost -p 15432
+ssh $HOST -t psql --host localhost -p 15432
