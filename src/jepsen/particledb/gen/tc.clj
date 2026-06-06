@@ -13,6 +13,17 @@
             [dom-top.core :refer [loopr]]
             [jepsen [util :as util]]))
 
+;; Repl ideas
+#_(do
+    (require '[clojure.test.check.generators :as g])
+    (require '[jepsen.particledb.gen.tc :as tc] :reload)
+    (doseq [case (g/sample (tc/gen-case {:max-statement-count 100 :max-table-count 2 :max-column-count 2}) 1)]
+      (println "\n\n# Case")
+      (println "Value pool:")
+      (pprint (:vpool (:schema case)))
+      (println)
+      (mapv println (:sql case)))
+    )
 
 ;; Table mangling
 
@@ -71,14 +82,6 @@
   [f gen]
   (g/bind gen f))
 
-(defn dense
-  "Takes a generator and produces one which tends to repeat earlier values.
-  This means that we're likely to (e.g.) generate queries for the specific
-  numbers we inserted earlier."
-  [gen]
-  ; TODO: no idea how to do this
-  )
-
 ;; Basic types/schemas
 
 (def column-names
@@ -115,7 +118,7 @@
 
 (def num-types
   "All numeric types, as a set."
-  #{:smallint :bigint :real :double})
+  #{:smallint :int :bigint :real :double})
 
 (def text-types
   "All textual types, as a set."
@@ -139,121 +142,6 @@
     :character-varying3 text-types
     :text               text-types
     type))
-
-;; Schemas
-
-(defn gen-column-schema
-  "Generates a column schema. A column schema is a map of the form:
-
-  {:name         \"c1\"
-   :type         :int
-   :not-null?    false
-   :unique?      false
-   :primary-key? true}"
-  [name]
-  (flet [type          gen-column-type
-         not-null?     g/boolean
-         unique?       g/boolean
-         primary-key?  g/boolean]
-        (cond-> {:name name
-                 :type type}
-          not-null?    (assoc :not-null? true)
-          unique?      (assoc :unique? true)
-          primary-key? (assoc :primary-key? true))))
-
-(defn column-schema->sql
-  "Turns a column schema into the SQL to create it."
-  [{:keys [type primary-key? unique? not-null?] :as col}]
-  (str (:name col) " "
-       (case type
-         :bit3               "bit(3)"
-         :character3         "character(3)"
-         :character-varying3 "character varying(3)"
-         :double             "double precision"
-         (name               type))
-       (when (text-types type)
-         " COLLATE unicode")
-       (when not-null? " NOT NULL")
-       (when unique? " UNIQUE")
-       (when primary-key? " PRIMARY KEY")
-         ))
-
-(defn remove-duplicate-primary-keys
-  "Takes a vector of columns and limits them to just one primary key."
-  [cols]
-  (loopr [pk?   false
-          cols' []]
-         [col cols]
-         (let [pk?' (or pk? (:primary-key? col))]
-           (recur pk?'
-                  (conj cols'
-                        (if (and pk? pk?')
-                          (dissoc col :primary-key?)
-                          col))))
-         cols'))
-
-(defn gen-table-schema
-  "Generates a table schema. A table schema is a map of the form:
-
-      {:name \"c1\"
-       :cols [column-schema ...]}
-
-  Options are:
-
-      :max-column-count The maximum number of columns"
-  [opts name]
-  ; We're doing a weird dance here to miminize the recurrent use of bind--this
-  ; should hopefully shrink better.
-  (->> (g/tuple (g/choose 1 (:max-column-count opts (count column-names)))
-                (g/shuffle column-names)
-                (probability 1/100))
-       ; Generate columns
-       (bind (fn [[col-count col-names duplicate-pks?]]
-               (g/tuple
-                 (->> col-names
-                      (take col-count)
-                      (mapv gen-column-schema)
-                      (apply g/tuple))
-                 (g/return duplicate-pks?))))
-       ; Filter columns and produce a schema
-       (g/fmap (fn [[cols duplicate-pks?]]
-                 (let [cols (if duplicate-pks?
-                              cols
-                              (remove-duplicate-primary-keys cols))]
-                   {:name name
-                    :cols cols})))))
-
-(defn table-schema->sql
-  "Turns a table schema into the SQL to create it."
-  [{:keys [name cols]}]
-  (str "CREATE TABLE " name " ("
-       (str/join ", " (map column-schema->sql cols)) ")"))
-
-(defn gen-schema
-  "Generates a schema. A schema is a vector of table schemas. Options:
-
-      :max-table-count  The maximum number of tables
-      :max-column-count The maximum number of columns"
-  [opts]
-  (->> (g/tuple (g/choose 1 (:max-table-count opts (count table-names)))
-                (g/shuffle table-names))
-       (bind (fn [[table-count table-names]]
-               (->> table-names
-                    (take table-count)
-                    (mapv (partial gen-table-schema opts))
-                    (apply g/tuple))))))
-
-(defn schema->create-sql
-  "Turns a schema into the SQL statements to create it."
-  [schema]
-  (mapv table-schema->sql schema))
-
-(defn schema->teardown-sql
-  "Turns a schema into the teardown SQL statements to destroy it."
-  [schema]
-  (mapv (fn [{:keys [name]}]
-          (str "DROP TABLE IF EXISTS " name))
-        schema))
 
 ;; Combinators
 
@@ -359,11 +247,11 @@
          y (g/double* {:infinite? false, :NaN? false})]
         (str "point(" x ", " y ")")))
 
-(defn gen-lit
+(defn gen-lit*
   "Takes a type and produces a generator of a literal value for that type."
   [type]
   (if (set? type)
-    (g/one-of (mapv gen-lit type))
+    (g/one-of (mapv gen-lit* type))
     (case type
       :bigint             gen-bigint-lit
       :bit3               (gen-bit-lit type)
@@ -378,12 +266,59 @@
       :smallint           gen-smallint-lit
       :text               (gen-string-lit))))
 
+(defn gen-lit-dense
+  "Takes a schema and a type, and returns a generator of literal values of that
+  type which are 'dense', in the sense that they frequently return the same
+  values. We use the schema's vpool for this."
+  ([schema type]
+   (assert (:vpool schema))
+   (if (set? type)
+     (g/one-of (mapv (partial gen-lit-dense schema) type))
+     (let [{:keys [integers floats strings]} (:vpool schema)]
+       (case type
+         :bigint             (g/elements integers)
+         :character3         (g/elements strings)
+         :character-varying3 (g/elements strings)
+         :double             (g/elements floats)
+         :int                (g/elements integers)
+         :real               (g/elements floats)
+         :smallint           (g/elements integers)
+         :text               (g/elements strings)
+         (gen-lit* type))))))
+
+(defn gen-lit
+  "Takes a schema and a type and returns a generator of literal values for that
+  type. Sometimes picks dense options from the schema, other times uses the raw
+  generators for more diverse inputs."
+  [schema type]
+  (g/one-of [(gen-lit-dense schema type)
+             (gen-lit* type)]))
+
+(defn gen-vpool
+  "A pool of literal values. We use this pool to generate the same values over
+  and over again, which is helpful for (e.g.) producing joins between tables,
+  or selecting via equality predicates.
+
+    {:integer  [\"1\", \"4\"]
+     :float    [\"1.23\"]
+     :text     [\"'foo'\" ...]}"
+  []
+  ; The idea here is that 1-4 distinct values ought to be enough--remember we
+  ; also mix tehse with other random values.
+  (let [opts {:min-elements 1 :max-elements 4}]
+    (g/hash-map
+      ; We pick small generators here so that they're likely to work across
+      ; domains
+      :integers (g/vector-distinct gen-smallint-lit opts)
+      :floats   (g/vector-distinct gen-real-lit opts)
+      :strings  (g/vector-distinct (gen-string-lit 3) opts))))
+
 (defn gen-expr-leaf
   "A generator for a simple expression of (usually) the given type which is
   (usually) valid in the context of the given table. For instance, 2, 'foo', or
   a, assuming a is a column of the right type."
-  [table type]
-  (let [lit (gen-lit type)
+  [schema table type]
+  (let [lit (gen-lit schema type)
         cols (->> (:cols table)
                   (filter (if (keyword? type)
                             ; Keyword match
@@ -413,6 +348,133 @@
        g/elements
        (g/fmap general-type)))
 
+;; Schemas
+
+(defn gen-column-schema
+  "Generates a column schema. A column schema is a map of the form:
+
+  {:name         \"c1\"
+   :type         :int
+   :not-null?    false
+   :unique?      false
+   :primary-key? true}"
+  [name]
+  (flet [type          gen-column-type
+         not-null?     g/boolean
+         unique?       g/boolean
+         primary-key?  g/boolean]
+        (cond-> {:name name
+                 :type type}
+          not-null?    (assoc :not-null? true)
+          unique?      (assoc :unique? true)
+          primary-key? (assoc :primary-key? true))))
+
+(defn column-schema->sql
+  "Turns a column schema into the SQL to create it."
+  [{:keys [type primary-key? unique? not-null?] :as col}]
+  (str (:name col) " "
+       (case type
+         :bit3               "bit(3)"
+         :character3         "character(3)"
+         :character-varying3 "character varying(3)"
+         :double             "double precision"
+         (name               type))
+       (when (text-types type)
+         " COLLATE unicode")
+       (when not-null? " NOT NULL")
+       (when unique? " UNIQUE")
+       (when primary-key? " PRIMARY KEY")
+         ))
+
+(defn remove-duplicate-primary-keys
+  "Takes a vector of columns and limits them to just one primary key."
+  [cols]
+  (loopr [pk?   false
+          cols' []]
+         [col cols]
+         (let [pk?' (or pk? (:primary-key? col))]
+           (recur pk?'
+                  (conj cols'
+                        (if (and pk? pk?')
+                          (dissoc col :primary-key?)
+                          col))))
+         cols'))
+
+(defn gen-table-schema
+  "Generates a table schema. A table schema is a map of the form:
+
+      {:name \"c1\"
+       :cols [column-schema ...]}
+
+  Options are:
+
+      :max-column-count The maximum number of columns"
+  [opts name]
+  ; We're doing a weird dance here to miminize the recurrent use of bind--this
+  ; should hopefully shrink better.
+  (->> (g/tuple (g/choose 1 (:max-column-count opts (count column-names)))
+                (g/shuffle column-names)
+                (probability 1/100))
+       ; Generate columns
+       (bind (fn [[col-count col-names duplicate-pks?]]
+               (g/tuple
+                 (->> col-names
+                      (take col-count)
+                      (mapv gen-column-schema)
+                      (apply g/tuple))
+                 (g/return duplicate-pks?))))
+       ; Filter columns and produce a schema
+       (g/fmap (fn [[cols duplicate-pks?]]
+                 (let [cols (if duplicate-pks?
+                              cols
+                              (remove-duplicate-primary-keys cols))]
+                   {:name name
+                    :cols cols})))))
+
+(defn table-schema->sql
+  "Turns a table schema into the SQL to create it."
+  [{:keys [name cols]}]
+  (str "CREATE TABLE " name " ("
+       (str/join ", " (map column-schema->sql cols)) ")"))
+
+(defn gen-schema
+  "Generates a schema. A schema is a map of:
+
+      :tables     A vector of table schemas.
+      :vpool      A map of types to a few values, like {:integer [\"3\"
+                  \"4\"]}. We use this to repeat the same values often in
+                  (e.g.) equality predicates.
+
+  Options:
+
+      :max-table-count  The maximum number of tables
+      :max-column-count The maximum number of columns"
+  [opts]
+  (->> (g/tuple
+         (g/choose 1 (:max-table-count opts (count table-names)))
+         (g/shuffle table-names)
+         (gen-vpool))
+       (bind (fn [[table-count table-names vpool]]
+               (g/hash-map
+                 :vpool  (g/return vpool)
+                 :tables (->> table-names
+                              (take table-count)
+                              (mapv (partial gen-table-schema opts))
+                              (apply g/tuple)))))))
+
+(defn schema->create-sql
+  "Turns a schema into the SQL statements to create it."
+  [schema]
+  (mapv table-schema->sql (:tables schema)))
+
+(defn schema->teardown-sql
+  "Turns a schema into the teardown SQL statements to destroy it."
+  [schema]
+  (mapv (fn [{:keys [name]}]
+          (str "DROP TABLE IF EXISTS " name))
+        (:tables schema)))
+
+
 ;; Expression generation
 
 ; When generating recursive expressions like ((a > 3) AND (c IS NULL)), it's
@@ -438,11 +500,11 @@
 
 (defn gen-expr-num
   "Generator of a numeric expression, like 5, c, or (a + 2)"
-  [table]
+  [schema table]
   (assoc
     (g/recursive-gen
       gen-expr-num-binary
-      (gen-expr-leaf table num-types))
+      (gen-expr-leaf schema table num-types))
     :type :num))
 
 ;; Boolean expressions
@@ -497,67 +559,69 @@
   "Takes a table, and builds a generator of possibly recursive boolean
   expressions like TRUE, or (a = (b - 5)), up to the given depth. 0 indicates
   leaf expressions only."
-  ([table]
-   (gen-expr-boolean table 1))
-  ([table depth]
+  ([schema table]
+   (gen-expr-boolean schema table 1))
+  ([schema table depth]
    (if (< depth 1)
-     (gen-expr-leaf table :boolean)
+     (gen-expr-leaf schema table :boolean)
      (g/one-of [; Our leaves can be simple boolean literals or columns
-                (gen-expr-leaf table :boolean)
+                (gen-expr-leaf schema table :boolean)
                 ; Or IS NULL expressions over any expression
-                (gen-expr-boolean-null (gen-expr table all-types (dec depth)))
+                (gen-expr-boolean-null
+                  (gen-expr schema table all-types (dec depth)))
                 ; Or a boolean comparison over two elements, hopefully of
                 ; similar types.
-                (gen-expr-boolean-compare (gen-expr-mostly-same-type table (dec depth)))
-                ; Or a boolean logic combination
+                (gen-expr-boolean-compare
+                  (gen-expr-mostly-same-type schema table (dec depth)))
+                ; Or a boolean logic combination over ourselves
                 (gen-expr-boolean-logic
-                  (gen-expr-boolean table (dec depth)))]))))
+                  (gen-expr-boolean schema table (dec depth)))]))))
 
 (defn gen-expr
   "Takes a table and a type (including a set of types), and and a depth bound.
   Returns a generator of expressions of that type. Depth 0 means only
   terminals."
-  ([table]
-   (gen-expr table all-types))
-  ([table type]
+  ([schema table]
+   (gen-expr schema table all-types))
+  ([schema table type]
    ; We allow up to two levels of general/boolean recursion
-   (gen-expr table type 1))
-  ([table type depth]
+   (gen-expr schema table type 1))
+  ([schema table type depth]
    ; Weirdly case won't dispatch correctly on all-types...
    (condp = type
      ; Compound expression generators
-     :boolean  (gen-expr-boolean table depth)
-     :smallint (gen-expr-num table)
-     :int      (gen-expr-num table)
-     :bigint   (gen-expr-num table)
-     :real     (gen-expr-num table)
-     :double   (gen-expr-num table)
-     num-types (gen-expr-num table)
-     all-types (g/one-of [(gen-expr-leaf table all-types)
-                          (gen-expr-boolean table depth)
-                          (gen-expr-num table)])
+     :boolean  (gen-expr-boolean schema table depth)
+     :smallint (gen-expr-num schema table)
+     :int      (gen-expr-num schema table)
+     :bigint   (gen-expr-num schema table)
+     :real     (gen-expr-num schema table)
+     :double   (gen-expr-num schema table)
+     num-types (gen-expr-num schema table)
+     all-types (g/one-of [(gen-expr-leaf schema table all-types)
+                          (gen-expr-boolean schema table depth)
+                          (gen-expr-num schema table)])
 
      ; Anything else, we can only generate a leaf
-     (gen-expr-leaf table type))))
+     (gen-expr-leaf schema table type))))
 
 (defn gen-expr-mostly-same-type
   "Given a table, picks a type in the table, and constructs expressions which
   are usually (but not always) of the same type, up to the given recursion
   depth."
-  [table depth]
+  [schema table depth]
   (g/bind (gen-type table)
           (fn [type]
-            (g/frequency [[10 (gen-expr table type depth)]
-                          [1  (gen-expr table all-types depth)]]))))
+            (g/frequency [[10 (gen-expr schema table type depth)]
+                          [1  (gen-expr schema table all-types depth)]]))))
 
 ;; Statements
 
 (defn gen-insert
   "Generates an INSERT statement."
   [schema]
-  (g/let [table (g/elements schema)
+  (g/let [table (g/elements (:tables schema))
           cols  (g/shuffle (:cols table))
-          vals  (->> (mapv (comp gen-lit :type) cols)
+          vals  (->> (mapv (comp (partial gen-lit schema) :type) cols)
                      (apply g/tuple))]
     (str "INSERT INTO " (:name table)
          " (" (str/join ", " (map :name cols)) ")"
@@ -565,36 +629,36 @@
 
 (defn gen-where?
   "Generates a (possibly empty) WHERE clause."
-  [table]
+  [schema table]
   (g/frequency
     [[1 (g/return nil)]
-     [2 (->> (gen-expr-boolean table)
+     [2 (->> (gen-expr-boolean schema table)
              (g/fmap (fn [w] (str " WHERE " w))))]]))
 
 (defn gen-update-pair
   "Takes a table and returns a generator of [col val] pairs, where col is a
   column name and val is an expression."
-  [table]
+  [schema table]
   (g/let [col (g/elements (:cols table))
-          val (gen-expr table (:type col))]
+          val (gen-expr schema table (:type col))]
     [(:name col) val]))
 
 (defn gen-update
   "Generates an UPDATE statement."
   [schema]
-  (g/let [table (g/elements schema)
+  (g/let [table (g/elements (:tables schema))
           ; TODO: generate duplicate assignments.
-          pairs (let [pairs (gen-update-pair table)
+          pairs (let [pairs (gen-update-pair schema table)
                       n     (count (:cols table))]
                   (rarely
                     ; With dups
-                    (g/vector (gen-update-pair table) 1 (inc n))
+                    (g/vector (gen-update-pair schema table) 1 (inc n))
                     ; No dups
                     (g/vector-distinct-by first
-                                          (gen-update-pair table)
+                                          (gen-update-pair schema table)
                                           {:min-elements 1
                                            :max-elements n})))
-          where (gen-where? table)]
+          where (gen-where? schema table)]
     (str "UPDATE " (:name table) " SET "
          (str/join ", "
                    (mapv (fn [[k v]]
@@ -606,7 +670,8 @@
   "Maybe generates a LIMIT clause."
   []
   (g/frequency [[1 (g/return nil)]
-                [2 (flet [n (g/large-integer* {:min -1})]
+                [2 (flet [n (rarely (g/elements [0 -1])
+                                    (g/large-integer* {:min 1}))]
                          (str " LIMIT " n))]]))
 
 (defn gen-offset?
@@ -671,10 +736,10 @@
 (defn gen-select
   "Generates a SELECT statement."
   [schema]
-  (->> (g/elements schema)
+  (->> (g/elements (:tables schema))
        (bind (fn [table]
                (flet [cols   (gen-select-cols table)
-                      where  (gen-where? table)
+                      where  (gen-where? schema table)
                       limit-offset-order (gen-limit-offset-order? table)]
                      (str "SELECT " cols " FROM " (:name table)
                           where
@@ -683,9 +748,9 @@
 (defn gen-delete
   "Generates a DELETE statement"
   [schema]
-  (->> (g/elements schema)
+  (->> (g/elements (:tables schema))
        (bind (fn [table]
-               (flet [where (gen-where? table)]
+               (flet [where (gen-where? schema table)]
                      (str "DELETE FROM " (:name table) where))))))
 
 (defn gen-statement
@@ -725,7 +790,8 @@
   (g/let [schema      (gen-schema opts)
           statements  (g/vector (gen-statement schema) 1
                                 (:max-statement-count opts))]
-    {:sql (into (schema->create-sql schema)
+    {:schema  schema
+     :sql (into (schema->create-sql schema)
                 (balance-txns statements))
      :teardown-sql (schema->teardown-sql schema)}))
 
