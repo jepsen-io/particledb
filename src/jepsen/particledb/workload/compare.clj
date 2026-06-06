@@ -63,6 +63,10 @@
         (or (infinite? a) (infinite? b))
         (= a b)
 
+        ; So our later epsilon comparison won't blow up
+        (and (== 0.0 a b))
+        true
+
         ; Otherwise, equality to within two units-in-last-place
         true
         (let [; How big is the bigger one?
