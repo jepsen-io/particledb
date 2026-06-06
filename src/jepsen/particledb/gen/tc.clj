@@ -568,14 +568,46 @@
                 [2 (flet [n (g/large-integer* {:min -1, :max 16})]
                          (str " OFFSET " n))]]))
 
+(def gen-order-dir
+  "Generates an ordering direction like ASC NULLS LAST"
+  (flet [dir   (g/elements ["" " ASC" " DESC"])
+         nulls (g/elements ["" " NULLS FIRST" " NULLS LAST"])]
+        (str dir nulls)))
+
 (defn gen-order?
   "Maybe generates an ORDER BY clause"
   [table]
   (g/frequency
     [[1 (g/return nil)]
      [1 (flet [col (g/elements (:cols table))
-               dir (g/elements ["" " ASC" " DESC"])]
+               dir gen-order-dir]
               (str " ORDER BY " (:name col) dir))]]))
+
+(defn gen-total-order
+  "Generates a total ordering clause for the given table."
+  [table]
+  (flet [cols (g/shuffle (mapv :name (:cols table)))
+         dirs (g/vector gen-order-dir (count (:cols table)))]
+        (str " ORDER BY "
+             (->> (map str cols dirs)
+                  (str/join ", ")))))
+
+(defn gen-limit-offset-order?
+  "Maybe generates a clause for LIMIT, OFFSET, and ORDER BY"
+  [table]
+  ; We want to get the same rows from this query when run against both
+  ; databases, but where the sort order is underspecified, they're legally
+  ; allowed to return different rows. To avoid this, we either generate a total
+  ; order, OR omit the limit and offset clauses (and in this case, we just
+  ; check set equivalence, not ordering).
+  (g/one-of
+    [; An order, no limit/offset
+     (gen-order? table)
+     ; Total order plus limit-offset
+     (flet [order  (gen-total-order table)
+            limit  (gen-limit?)
+            offset (gen-offset?)]
+           (str order offset limit))]))
 
 (defn gen-select-cols
   "Generates the columns to select in a SELECT statement."
@@ -593,14 +625,10 @@
        (bind (fn [table]
                (flet [cols   (gen-select-cols table)
                       where  (gen-where? table)
-                      order  (gen-order? table)
-                      limit  (gen-limit?)
-                      offset (gen-offset?)]
+                      limit-offset-order (gen-limit-offset-order? table)]
                      (str "SELECT " cols " FROM " (:name table)
                           where
-                          order
-                          limit
-                          offset))))))
+                          limit-offset-order))))))
 
 (defn gen-delete
   "Generates a DELETE statement"

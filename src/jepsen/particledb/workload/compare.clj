@@ -153,6 +153,44 @@
       (equiv? pg pdb))
     (equiv? pg pdb)))
 
+(defn equiv-unordered-row
+  "Turns a row into something we can compare using =, for equiv-unordered?"
+  [row]
+  (update-vals row
+               (fn project [x]
+                 (cond ; Being SUPER conservative
+                       (float? x) (Math/round x)
+
+                       true   x))))
+
+(defn equiv-unordered-set
+  "Computes the unordered, comparable-with-=, set for equiv-unordered?"
+  [rows]
+  (persistent!
+    (reduce (fn [rows row]
+              (conj! rows (equiv-unordered-row row)))
+            (transient #{})
+            rows)))
+
+(defn equiv-unordered?
+  "When we do a select without an ORDER BY clause, we have to allow the results
+  to be equivalent regardless of row order. This is a little tricky because we
+  have all this weird logic around floating point equivalence, on account of
+  ParticleDB doing higher floating-point precision. So what we do here is cheat
+  a little--we transform the rows into things we know will DEFINITELY compare
+  equal (like integers), and check for set equivalence."
+  [as bs]
+  (= (equiv-unordered-set as)
+     (equiv-unordered-set bs)))
+
+(defn unordered-select?
+  "Is this SQL string a SELECT without an ORDER BY clause?"
+  [sql]
+  (and (re-find #"^SELECT" sql)
+       ; Ugh, this is fragile, but it's probably not going to break given how
+       ; weird our generated strings are.
+       (not (re-find #"ORDER BY" sql))))
+
 (defn equiv-mop?
   "Are the postgres and particledb results for the given SQL query equivalent?
   Takes a map of :sql (a string) and the :pg and :pdb results from j/execute!."
@@ -165,10 +203,17 @@
       (and (map? pdb)
            (= :txn-aborted (:type pdb))
            (= [{:next.jdbc/update-count 0}] pg))
+
       ; Actual data
       (and (= (count pg) (count pdb))
-           (every? identity
-                   (map equiv-row? pg pdb)))))
+           (cond ; If we're doing an unordered select, compare as sets
+                 (unordered-select? sql)
+                 (equiv-unordered? pg pdb)
+
+                 ; Otherwise we should get equivalent rows
+                 true
+                 (every? identity
+                         (map equiv-row? pg pdb))))))
 
 (defn origin
   "Takes an SQL operation and returns an origin string describing roughly where
