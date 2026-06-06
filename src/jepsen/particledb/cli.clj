@@ -35,7 +35,9 @@
 (defn expected-consistency-model
   "What consistency level do we expect for a given transaction mode and wal
   sync mode?"
-  [{:keys [txn-mode wal-sync-mode]}]
+  ; I *think* these are the defaults, but the docs contradict themselves so ???
+  [{:keys [txn-mode wal-sync-mode]
+    :or {txn-mode :occ-v3, wal-sync-mode :groupsync}}]
   (cond ; In fast txn mode, they start listing allowed anomalies at P4 and A5A,
         ; and also say that "no dirty reads", so I think we should be at...
         ; read committed? Maybe MAV? SI is out, not sure about causal.
