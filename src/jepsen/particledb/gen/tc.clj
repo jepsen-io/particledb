@@ -93,7 +93,21 @@
 
 (def all-types-vec
   "All possible types, in order for shrinking."
-  [:boolean :smallint :bigint :real :double :text])
+  [:boolean
+   :int
+   :smallint
+   :bigint
+   :real
+   :double
+   :text
+   :character3
+   :character-varying3
+   ; There's a point column type, but apparently no point(x, y) constructor?
+   ;:point
+   ; Apparently the parser doesn't know about the B'010' syntax???
+   ;:bit3
+   ;:bit-varying
+   ])
 
 (def all-types
   "All possible types, as a set."
@@ -102,6 +116,10 @@
 (def num-types
   "All numeric types, as a set."
   #{:smallint :bigint :real :double})
+
+(def text-types
+  "All textual types, as a set."
+  #{:character3 :character-varying3 :text})
 
 (def gen-column-type
   "A generator for a column type."
@@ -112,11 +130,14 @@
   itself. We use this to generate (e.g.) assignments from float to int."
   [type]
   (case type
-    :smallint num-types
-    :int      num-types
-    :bigint   num-types
-    :real     num-types
-    :double   num-types
+    :smallint           num-types
+    :int                num-types
+    :bigint             num-types
+    :real               num-types
+    :double             num-types
+    :character3         text-types
+    :character-varying3 text-types
+    :text               text-types
     type))
 
 ;; Schemas
@@ -145,9 +166,12 @@
   [{:keys [type primary-key? unique? not-null?] :as col}]
   (str (:name col) " "
        (case type
-         :double "double precision"
-         (name type))
-       (when (#{:text} type)
+         :bit3               "bit(3)"
+         :character3         "character(3)"
+         :character-varying3 "character varying(3)"
+         :double             "double precision"
+         (name               type))
+       (when (text-types type)
          " COLLATE unicode")
        (when not-null? " NOT NULL")
        (when unique? " UNIQUE")
@@ -248,11 +272,19 @@
   (nullable
     (g/elements ["TRUE" "FALSE"])))
 
-(def gen-string-lit
-  "Generates a string literal. We're just doing simple strings for now."
-  (nullable
-    (g/fmap (fn [s] (str "'" s "'"))
-            (g'/string-from-regex #"[A-Za-z0-9\- _]+"))))
+(defn gen-string-lit
+  "Generates a string literal. We're just doing simple strings for now. With no
+  args, generates variable width strings. With an integer size, generates
+  strings that *mostly* fit there."
+  ([]
+   (nullable
+     (g/fmap (fn [s] (str "'" s "'"))
+             (g'/string-from-regex #"[A-Za-z0-9\- _]+"))))
+  ([n]
+   (nullable
+     (flet [s (g'/string-from-regex
+                (re-pattern (str "[A-Za-z0-9\\- _]{0," (inc n) "}")))]
+           (str "'" s "'")))))
 
 (defn gen-long
   "A generator of Long values between lower and upper, inclusive."
@@ -314,19 +346,37 @@
                      "NULL"])
                   g/double)))
 
+(defn gen-bit-lit
+  "Generates a bit string literal for a type like :bit3."
+  [type]
+  (case type
+    :bit3        (g'/string-from-regex #"B'[01]{3}'")
+    :bit-varying (g'/string-from-regex #"B'[01]+'")))
+
+(def gen-point-lit
+  "Generates a point literal like (1.23, 4.6)"
+  (flet [x (g/double* {:infinite? false, :NaN? false})
+         y (g/double* {:infinite? false, :NaN? false})]
+        (str "point(" x ", " y ")")))
+
 (defn gen-lit
   "Takes a type and produces a generator of a literal value for that type."
   [type]
   (if (set? type)
     (g/one-of (mapv gen-lit type))
     (case type
-      :boolean  gen-boolean-lit
-      :smallint gen-smallint-lit
-      :int      gen-int-lit
-      :bigint   gen-bigint-lit
-      :real     gen-real-lit
-      :double   gen-double-lit
-      :text     gen-string-lit)))
+      :bigint             gen-bigint-lit
+      :bit3               (gen-bit-lit type)
+      :bit-varying        (gen-bit-lit type)
+      :boolean            gen-boolean-lit
+      :character3         (gen-string-lit 3)
+      :character-varying3 (gen-string-lit 3)
+      :double             gen-double-lit
+      :int                gen-int-lit
+      :point              gen-point-lit
+      :real               gen-real-lit
+      :smallint           gen-smallint-lit
+      :text               (gen-string-lit))))
 
 (defn gen-expr-leaf
   "A generator for a simple expression of (usually) the given type which is

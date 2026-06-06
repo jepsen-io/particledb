@@ -29,7 +29,28 @@
                          PersistentArrayMap
                          PersistentVector
                          PersistentQueue)
+           (java.sql ResultSet
+                     ResultSetMetaData)
+           (org.postgresql.geometric PGpoint)
            (org.postgresql.util PSQLException)))
+
+; We use Clojure representations for some of the more interesting datatypes;
+; makes them easier to print and serialize.
+(defrecord Point [x y])
+
+(def builder-fn
+  "This is how we rewrite next.jdbc rows before further processing."
+  (rs/as-maps-adapter
+    ; Note that Postgres includes table names in column identifiers, but
+    ; ParticleDB doesn't. We'll be nice and just drop the table names.
+    ; ParticleDB also returns capital columns like COUNT, iwhere PG says count.
+    rs/as-unqualified-lower-maps
+    (fn reader [^ResultSet rs ^ResultSetMetaData _ ^Integer i]
+      (let [v (.getObject rs i)]
+        ; (info "builder type" (class v))
+        (condp instance? v
+          PGpoint (Point. (.x v) (.y v))
+          v)))))
 
 (defn execute!
   "Like jdbc execute!, but converts exceptions to values. We want this because
@@ -38,7 +59,7 @@
   (sqlc/try+
     ; Note that Postgres returns qualified names, ParticleDB returns
     ; unqualified ones. We'll unqualify all here.
-    (j/execute! conn sql {:builder-fn rs/as-unqualified-lower-maps})
+    (j/execute! conn sql {:builder-fn builder-fn})
     (catch [:type :connection-closed] e
       ; We actually want this to bubble up, so we can reconnect.
       (throw+ e))
