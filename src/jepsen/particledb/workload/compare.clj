@@ -1064,6 +1064,10 @@
       (println)
       (println "# Condensed case")
       (println)
+      (doseq [sql (:teardown-sql (:value op))]
+        (print (gen.tc/mangle-table-str nil sql))
+        (println ";"))
+      (println)
       (doseq [{:keys [sql]} (:sql (:value op))]
         (print (gen.tc/mangle-table-str nil sql))
         (println ";")))))
