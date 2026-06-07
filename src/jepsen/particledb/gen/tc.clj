@@ -86,7 +86,7 @@
 
 (def column-names
   "All column names, as a vector."
-  ["a" "b" "c" "d" "e"])
+  (mapv str "abcdefghijklmnopqrs"))
 
 (def table-names
   "All table names, as a vector."
@@ -403,33 +403,34 @@
 (defn gen-table-schema
   "Generates a table schema. A table schema is a map of the form:
 
-      {:name \"c1\"
-       :cols [column-schema ...]}
+  {:name \"c1\"
+  :cols [column-schema ...]}
 
   Options are:
 
-      :max-column-count The maximum number of columns"
+  :max-column-count The maximum number of columns"
   [opts name]
   ; We're doing a weird dance here to miminize the recurrent use of bind--this
   ; should hopefully shrink better.
-  (->> (g/tuple (g/choose 1 (:max-column-count opts (count column-names)))
-                (g/shuffle column-names)
-                (probability 1/100))
-       ; Generate columns
-       (bind (fn [[col-count col-names duplicate-pks?]]
-               (g/tuple
-                 (->> col-names
-                      (take col-count)
-                      (mapv gen-column-schema)
-                      (apply g/tuple))
-                 (g/return duplicate-pks?))))
-       ; Filter columns and produce a schema
-       (g/fmap (fn [[cols duplicate-pks?]]
-                 (let [cols (if duplicate-pks?
-                              cols
-                              (remove-duplicate-primary-keys cols))]
-                   {:name name
-                    :cols cols})))))
+  (let [mcc (:max-column-count opts (count column-names))]
+    (->> (g/tuple (g/choose 1 mcc)
+                  (g/shuffle (vec (take mcc column-names)))
+                  (probability 1/100))
+         ; Generate columns
+         (bind (fn [[col-count col-names duplicate-pks?]]
+                 (g/tuple
+                   (->> col-names
+                        (take col-count)
+                        (mapv gen-column-schema)
+                        (apply g/tuple))
+                   (g/return duplicate-pks?))))
+         ; Filter columns and produce a schema
+         (g/fmap (fn [[cols duplicate-pks?]]
+                   (let [cols (if duplicate-pks?
+                                cols
+                                (remove-duplicate-primary-keys cols))]
+                     {:name name
+                      :cols cols}))))))
 
 (defn table-schema->sql
   "Turns a table schema into the SQL to create it."
@@ -727,23 +728,141 @@
 (defn gen-select-cols
   "Generates the columns to select in a SELECT statement."
   [table]
-  (g/one-of [(g/return "*")
-             (flet [cols (g/vector (g/elements (:cols table))
-                                   1 (+ 1 (count (:cols table))))]
-                   (str/join ", " (map :name cols)))
-             (g/return "COUNT(*)")]))
+  (let [n (count (:cols table))]
+    (g/one-of [(flet [cols (g/vector (g/elements (:cols table))
+                                     1 n)
+                      ases (g/vector (g/one-of [(g/return nil)
+                                                (g/elements column-names)])
+                                     1 n)]
+                     (prn :cols cols)
+                     (prn :ases ases)
+                     (->> (map (fn [col as]
+                                 (str (:name col)
+                                      (when as
+                                        (str " AS " as))))
+                               cols
+                               ases)
+                          (str/join ", ")))
+               ; Everything
+               (g/return "*")
+               ; Aggregate
+               (g/return "COUNT(*)")])))
+
+(defn qualify
+  "Takes a table and a column, and returns the qualified column {:name \"t.i\"
+  :type ...}"
+  [table column]
+  (assoc column :name (str (:name table) "." (:name column))))
+
+(defn qualify-cols
+  "Takes a table and returns a vector of its columns, qualified."
+  [table]
+  (mapv (partial qualify table) (:cols table)))
+
+(defn merge-tables
+  "Takes a vector of tables and produces a merged table with qualified columns
+  from each."
+  [tables]
+  {:name ::merged
+   :cols (->> tables
+              (mapcat qualify-cols)
+              vec)})
+
+(defn select-join-cols
+  "Takes two tables, t and t', and an integer i. Returns [col, col']: two
+  qualified columns drawn from t and t' respectively, which are hopefully of
+  compatible types. Uses i to pick an option if there are multiple compatible
+  columns. Each column is of the form:
+
+    {:name \"t.i\"
+     :type ...}"
+  [t t' i]
+  (let [cols  (group-by (comp general-type :type) (:cols t))
+        cols' (group-by (comp general-type :type) (:cols t'))
+        ; Types in common
+        types (vec (set/intersection (set (keys cols))
+                                     (set (keys cols'))))
+        ; Pick candidate columns
+        [cols cols']
+        (if (seq types)
+          ; We have a type in common
+          (let [type (nth types (mod i (count types)))]
+            [(get cols  type)
+             (get cols' type)])
+          ; As a fallback, pick random cols and see what happens
+          [(:cols t) (:cols t')])
+        ; Get a little more randomness
+        j   (hash i)
+        k   (hash j)]
+    ; Pick specific columns
+    [(qualify t  (nth cols  (mod j (count cols))))
+     (qualify t' (nth cols' (mod j (count cols'))))]))
+
+(defn gen-select-join
+  "A generator for a JOIN clause from the current table to the given table'."
+  [schema table table']
+  (flet [dir    g/boolean        ; Direction for the join predicate
+         i      g/small-integer ; Which compatible column do we use?
+         type (g/elements [""
+                           " INNER"
+                           " LEFT"
+                           " RIGHT"
+                           " FULL"
+                           " CROSS"])]
+        (let [; Randomize whether we join a = b or b = a
+              [t t'] (if dir [table table'] [table' table])
+              ; Find columns of compatible types
+              [col col'] (select-join-cols t t' i)]
+          (str type " JOIN " (:name table')
+               " ON " (:name col) " = " (:name col')))))
+
+(defn gen-select-joins
+  "A generator for a series of JOIN clauses between several tables, assuming
+  the first table is the one we start selecting from."
+  [schema [table & join-tables :as tables]]
+  (if (seq join-tables)
+    (->> (g/tuple
+           ; The tables we will join to
+           (g/shuffle join-tables)
+           ; The tables we'll join *from*, in corresponding order
+           (g/vector (g/elements tables) (count join-tables)))
+         ; Ensure that we don't try to join tables to themselves
+         (g/such-that (fn [[ts ts']]
+                        (every? identity (map not= ts ts'))))
+         ; Produce a vector of join clauses
+         (bind (fn [[join-tables from-tables]]
+                 (apply g/tuple (mapv (partial gen-select-join schema)
+                                      from-tables
+                                      join-tables))))
+         ; Glue together
+         (g/fmap (partial str/join " ")))
+    ; No other tables
+    (g/return nil)))
+
+(defn gen-select-tables
+  "Takes a schema and returns a generator of tables to join together for a
+  SELECT. At least one table; the base table we start with."
+  [schema]
+  ; TODO: maybe *not* distinct?
+  (g/vector-distinct (g/elements (:tables schema))
+                     {:min-elements 1
+                      :max-elements (count (:tables schema))}))
 
 (defn gen-select
   "Generates a SELECT statement."
   [schema]
-  (->> (g/elements (:tables schema))
-       (bind (fn [table]
-               (flet [cols   (gen-select-cols table)
-                      where  (gen-where? schema table)
-                      limit-offset-order (gen-limit-offset-order? table)]
-                     (str "SELECT " cols " FROM " (:name table)
-                          where
-                          limit-offset-order))))))
+  (->> (gen-select-tables schema)
+       (bind (fn [[table0 & more-tables :as tables]]
+               (let [table (merge-tables tables)]
+                 (flet [cols   (gen-select-cols table)
+                        joins  (gen-select-joins schema tables)
+                        where  (gen-where? schema table)
+                        limit-offset-order (gen-limit-offset-order? table)]
+                       (str "SELECT " cols
+                            " FROM " (:name table0)
+                            joins
+                            where
+                            limit-offset-order)))))))
 
 (defn gen-delete
   "Generates a DELETE statement"
@@ -959,7 +1078,7 @@
   ; bind reasons), so we build a loop that gradually expands the
   ; schemas over time.
   (info "Pass 1: standard test.check search")
-  (loop [max-table-count 1
+  (loop [max-table-count 2
          max-column-count 1]
     (info "Trying up to"
           max-table-count "tables and"

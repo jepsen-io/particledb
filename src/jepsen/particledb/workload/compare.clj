@@ -187,11 +187,14 @@
 (defn equiv-unordered-set
   "Computes the unordered, comparable-with-=, set for equiv-unordered?"
   [rows]
-  (persistent!
-    (reduce (fn [rows row]
-              (conj! rows (equiv-unordered-row row)))
-            (transient #{})
-            rows)))
+  (if (sequential? rows)
+    (persistent!
+      (reduce (fn [rows row]
+                (conj! rows (equiv-unordered-row row)))
+              (transient #{})
+              rows))
+    ; Oh, uhhh, maybe this is an error instead?
+    rows))
 
 (defn equiv-unordered?
   "When we do a select without an ORDER BY clause, we have to allow the results
