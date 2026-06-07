@@ -734,8 +734,6 @@
                       ases (g/vector (g/one-of [(g/return nil)
                                                 (g/elements column-names)])
                                      1 n)]
-                     (prn :cols cols)
-                     (prn :ases ases)
                      (->> (map (fn [col as]
                                  (str (:name col)
                                       (when as
