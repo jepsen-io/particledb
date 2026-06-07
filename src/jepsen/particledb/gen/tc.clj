@@ -1178,7 +1178,7 @@
       (try
         (let [checked (worker-pass-1! opts last-id queue)]
           (when-let [smallest (first (:smallest (:shrunk checked)))]
-            (worker-pass-2! opts smallest last-id queue)))
+            (worker-pass-2! opts last-id queue smallest)))
         (catch Throwable t
           (warn t "Jepsen test.check worker crashed!")
           (throw t))
