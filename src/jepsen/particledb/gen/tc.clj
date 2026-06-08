@@ -812,7 +812,8 @@
               ; Find columns of compatible types
               [col col'] (select-join-cols t t' i)]
           (str type " JOIN " (:name table')
-               " ON " (:name col) " = " (:name col')))))
+               (when (not= " CROSS" type)
+                 " ON " (:name col) " = " (:name col'))))))
 
 (defn gen-select-joins
   "A generator for a series of JOIN clauses between several tables, assuming
