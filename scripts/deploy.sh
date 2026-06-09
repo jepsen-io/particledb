@@ -18,9 +18,11 @@ ssh $HOST bash -c "'cd /opt/particledb; \
   start \
   --data-dir /opt/particledb/data \
   --pg-addr 0.0.0.0:15432 \
-  --txn-mode occ-v3 \
   --no-auth \
+  --txn-mode occ-v3 \
   ; \
   while ! echo exit | nc -z localhost 15432; do sleep 0.5; done;
   '" &&
 ssh $HOST -t psql --host localhost -p 15432
+#  --pg-username jepsenuser \
+#  --pg-password jepsenpw \
