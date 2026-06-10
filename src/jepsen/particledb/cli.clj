@@ -172,6 +172,17 @@
          (when (seq n)
            (str " " (->> n (map name) sort (str/join ",")))))))
 
+(defn exceptions-checker
+  "Normally we let unexpected exceptions pass, but ParticleDB has found *so
+  many* incredibly weird ways to fail--like totally forgetting a column
+  exists--that I think it's safest for us to flag them."
+  []
+  (let [checker (checker/unhandled-exceptions)]
+    (reify checker/Checker
+      (check [this test history opts]
+        (let [r (checker/check checker test history opts)]
+          (assoc r :valid? (not (seq (:exceptions r)))))))))
+
 (defn particledb-test
   "Takes CLI options and constructs a Jepsen test map"
   [opts]
@@ -246,7 +257,7 @@
                        {:perf       (checker/perf)
                         :clock      (checker/clock-plot)
                         :stats      (checker/stats)
-                        :exceptions (checker/unhandled-exceptions)
+                        :exceptions (exceptions-checker)
                         :workload   (:checker workload)})
            ;:client    (a/client (:client workload))
            :client    (:client workload)
