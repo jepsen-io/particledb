@@ -9,6 +9,7 @@
             [next.jdbc :as j]
             [next.jdbc.result-set :as rs])
   (:import (clojure.lang ExceptionInfo)
+           (java.net SocketException)
            (java.sql SQLException)
            (org.particledb Driver)))
 
@@ -30,6 +31,13 @@
   [e]
   (let [m (.getMessage e)]
     (condp identical? (class e)
+      SocketException
+      (condp re-find m
+        "Connection reset"
+        {:type :conn-reset}
+
+        nil)
+
       SQLException
       (condp re-find m
         #"PDB JDBC: null"
