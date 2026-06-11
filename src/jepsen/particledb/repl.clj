@@ -84,9 +84,11 @@
                 clients)))))
 
 (defn repro-text!
-  "Takes a string with SQL statements, one per line. Executes those statements
-  sqeuentially against each client, and prints out the results."
-  [text]
+  "Opens all three SQL clients. Takes a string with SQL statements, one per
+  line. Executes those statements sqeuentially against each client, and prints
+  out the results."
+  [node text]
+  (open3! node)
   (with-unified-sql-client-errors
     (let [statements (->> (str/split-lines text)
                           (remove str/blank?)
@@ -106,7 +108,10 @@
                                 (map (fn [client]
                                        [client (get-in results [client i])]))
                                 (into {}))
-                   color (if (apply = (vals results))
+                   color (if (or ; Errors
+                                 (every? map? (vals results))
+                                 ; Regular results
+                                 (apply = (vals results)))
                            colors/white
                            colors/red)]
                (do (println sql)
@@ -120,17 +125,17 @@
 
 (defn repro-file!
   "Takes a filename with SQL statements, one per line, and executes them against all bound clients, printing results. Default file is repro.sql."
-  ([]
-   (repro-file! "repro.sql"))
-  ([file]
-   (repro-text! (slurp file))))
+  ([node]
+   (repro-file! node "repro.sql"))
+  ([node file]
+   (repro-text! node (slurp file))))
 
 (defn repro-watch!
   "Like repro-file!, but watches the file for changes."
-  ([]
-   (repro-watch! "repro.sql"))
-  ([target-file]
-   (repro-file! target-file)
+  ([node]
+   (repro-watch! node "repro.sql"))
+  ([node target-file]
+   (repro-file! node target-file)
    (let [last-time (atom (System/nanoTime))]
      (watch-dir
        (fn [{:keys [file action] :as event}]
@@ -140,6 +145,6 @@
              (when (< 5e8 (- t' t))
                ; Ugh, another hack: it takes a few millis to write a file
                (Thread/sleep 5)
-               (repro-file! file)
+               (repro-file! node file)
                (prn)))))
        (io/file ".")))))

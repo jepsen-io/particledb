@@ -28,7 +28,8 @@
                          PersistentVector
                          PersistentQueue)
            (java.sql ResultSet
-                     ResultSetMetaData)
+                     ResultSetMetaData
+                     SQLException)
            (org.postgresql.util PSQLException)))
 
 (defn mop!
@@ -41,6 +42,8 @@
       (throw+ e))
     (catch (:type %) e
       e)
+    (catch SQLException e
+      {:type :sql-error :msg (.getMessage e)})
     (catch PSQLException e
       {:type :psql-error, :msg (.getMessage e)})
     (catch IllegalStateException e

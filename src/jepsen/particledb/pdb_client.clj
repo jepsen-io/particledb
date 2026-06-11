@@ -43,6 +43,9 @@
         #"PDB JDBC: null"
         {:type :pdb-jdbc-null, :msg m, :definite? false}
 
+        #"contains null values"
+        {:type :contains-null-values, :msg m, :definite? true}
+
         #"could not serialize access"
         {:type :could-not-serialize, :msg m, :definite? true}
 
@@ -51,6 +54,9 @@
 
         #"duplicate key value"
         {:type :duplicate, :msg m, :definite? true}
+
+        #"violates not-null constraint"
+        {:type :not-null, :msg m, :definite? true}
         nil)
 
       ExceptionInfo

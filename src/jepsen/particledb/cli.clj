@@ -459,8 +459,7 @@
            (let [[node file] arguments
                  file (or file "repro.sql")]
              ; hack hack haaaaaack
-             (repl/open3! (or node "n9"))
-             (repl/repro-watch! file)
+             (repl/repro-watch! node file)
              (info "Watching" file "for changes")
              (while true
                (Thread/sleep 1000))))}})
