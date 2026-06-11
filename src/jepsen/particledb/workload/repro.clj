@@ -84,18 +84,21 @@
 (defn workload
   "Constructs a workload given CLI options. Special options:
 
-  :generator    The generator of operations
-  :invalid-op?  True if an ok op produced invalid results"
-  [opts]
-  {:client    (sqlc/client (Client.)
-                           (assoc opts
-                                  ; Can also try the Postgres client here
-                                  ;:jepsen.sql/open     pgc/open
-                                  ;:jepsen.sql/error-fn pgc/error-fn
+      :protocol     :particledb or :postgres
+      :generator    The generator of operations
+      :invalid-op?  True if an ok op produced invalid results"
+  [{:keys [protocol generator invalid-op?]
+    :or {protocol :particledb}
+    :as opts}]
+  {:client (sqlc/client (Client.)
+                        (merge opts
+                               (case protocol
+                                 :particledb
+                                 {:jepsen.sql/open     pdbc/open
+                                  :jepsen.sql/error-fn pdbc/error-fn}
 
-                                  ; Or the ParticleDB one
-                                  :jepsen.sql/open     pdbc/open
-                                  :jepsen.sql/error-fn pdbc/error-fn
-                                  ))
-   :generator (:generator opts)
-   :checker   (sql.checker/compose (Checker. (:invalid-op? opts)) :repro)})
+                                 :postgres
+                                 {:jepsen.sql/open     pgc/open
+                                  :jepsen.sql/error-fn pgc/error-fn})))
+   :generator generator
+   :checker   (sql.checker/compose (Checker. invalid-op?) :repro)})

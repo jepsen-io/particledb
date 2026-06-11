@@ -19,10 +19,11 @@
             [jepsen.particledb [db :as db]
                                [nemesis :as nemesis]
                                [pdb-client :as pdb-client]]
-            [jepsen.particledb.workload [compare :as compare]
-                                        [internal-psql :as internal-psql]
-                                        [repro-character-dups :as
-                                         repro-character-dups]]
+            [jepsen.particledb.workload
+             [compare :as compare]
+             [internal-psql :as internal-psql]
+             [repro-character-dups :as repro-character-dups]
+             [repro-missing-rows :as repro-missing-rows]]
             [jepsen.postgres [cli :as pcli]]
             [jepsen.os.debian :as debian]))
 
@@ -82,7 +83,8 @@
          {:none                 (constantly tests/noop-test)
           :compare              compare/workload
           :internal-psql        internal-psql/workload
-          :repro-character-dups repro-character-dups/workload}))
+          :repro-character-dups repro-character-dups/workload
+          :repro-missing-rows   repro-missing-rows/workload}))
 
 (def standard-workloads
   "All the workloads we run by default."
