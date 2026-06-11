@@ -20,7 +20,9 @@
                                [nemesis :as nemesis]
                                [pdb-client :as pdb-client]]
             [jepsen.particledb.workload [compare :as compare]
-                                        [internal-psql :as internal-psql]]
+                                        [internal-psql :as internal-psql]
+                                        [repro-character-dups :as
+                                         repro-character-dups]]
             [jepsen.postgres [cli :as pcli]]
             [jepsen.os.debian :as debian]))
 
@@ -77,9 +79,10 @@
                         (keyword (str (name k) "-pg"))))
          ; And these use the ParticleDB SDK
          pdb-client/workloads
-         {:none          (constantly tests/noop-test)
-          :compare       compare/workload
-          :internal-psql internal-psql/workload}))
+         {:none                 (constantly tests/noop-test)
+          :compare              compare/workload
+          :internal-psql        internal-psql/workload
+          :repro-character-dups repro-character-dups/workload}))
 
 (def standard-workloads
   "All the workloads we run by default."

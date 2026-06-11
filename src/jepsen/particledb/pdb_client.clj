@@ -50,7 +50,7 @@
         {:type :aborted, :msg m, :definite? true}
 
         #"duplicate key value"
-        {:type :duplicate, :definite? true}
+        {:type :duplicate, :msg m, :definite? true}
         nil)
 
       ExceptionInfo
