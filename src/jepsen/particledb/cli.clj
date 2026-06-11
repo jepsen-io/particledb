@@ -253,12 +253,14 @@
            :seed     seed
            :os       os
            :db       db
-           :checker  (checker/compose
-                       {:perf       (checker/perf)
-                        :clock      (checker/clock-plot)
-                        :stats      (checker/stats)
-                        :exceptions (exceptions-checker)
-                        :workload   (:checker workload)})
+           :checker  (checker/flatten
+                       (checker/compose
+                         {:perf       (checker/perf)
+                          :clock      (checker/clock-plot)
+                          :stats      (checker/stats)
+                          :exceptions (exceptions-checker)
+                          :workload   (:checker workload)})
+                       :workload)
            ;:client    (a/client (:client workload))
            :client    (:client workload)
            ;:nemesis   (if (a/antithesis?)
