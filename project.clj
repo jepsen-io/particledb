@@ -22,7 +22,11 @@
                                com.fasterxml.jackson.core/jackson-databind
                                com.fasterxml.jackson.core/jackson-annotations]]
                  [org.apache.arrow/arrow-memory-netty "15.0.2"
-                  :exclusions [org.slf4j/slf4j-api]]]
+                  :exclusions [org.slf4j/slf4j-api]]
+                 ; Just for the repl's repro watcher
+                 [juxt/dirwatch "0.2.5"
+                  :exclusions [org.slf4j/slf4j-api]]
+                 [clojure-term-colors "0.1.0"]]
   :repl-options {:init-ns jepsen.particledb.repl}
   :main jepsen.particledb.cli
   :aot [jepsen.particledb.cli]

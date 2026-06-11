@@ -127,6 +127,61 @@ if ParticleDB and Postgres diverged, the results for each respectively. There
 also follows a condensed version which can be copy-pasted into e.g. a `psql` shell
 to reproduce the problem interactively.
 
+## Interactive Reproducer
+
+There's a silly hack here for playing around with ParticleDB. You can run:
+
+```clj
+lein run repro-watch n2 repro.sql
+```
+
+This will connect to ParticleDB and Postgres on `n2`, assuming the same sort of
+setup that the test uses. It'll watch for changes in `repro.sql`, which
+contains SQL statements, one per line. It submits those SQL statements
+sequentially to both databases and for ParticleDB, using both the Postgres and
+ParticleDB clients. Then it prints out the statements with how each client
+responded to them, highlighting any divergences. This way you can edit the SQL
+in your favorite text editor and get instant feedback.
+
+An easy way to get an instance of Postgres and ParticleDB running is to run the
+`compare` workload with `--leave-db-running`. You can also quickly deploy
+various ParticleDB versions using `scripts/deploy`. I'm afraid these are
+quick-and-dirty hacks and have a few things hardcoded for my environment, but
+they may be useful regardless.
+
+For example, here's a problem with NaN using ParticleDB 1.1.18.11.rc-1.
+
+```
+lein run repro-watch n9 repro.sql
+...
+DROP TABLE IF EXISTS t;
+  :pdb-pdb [#:next.jdbc{:update-count 0}]
+   :pdb-pg [#:next.jdbc{:update-count 0}]
+       :pg [#:next.jdbc{:update-count 0}]
+CREATE TABLE t (a real);
+  :pdb-pdb [#:next.jdbc{:update-count 0}]
+   :pdb-pg [#:next.jdbc{:update-count 0}]
+       :pg [#:next.jdbc{:update-count 0}]
+INSERT INTO t (a) VALUES ('NaN');
+  :pdb-pdb [#:next.jdbc{:update-count 1}]
+   :pdb-pg [#:next.jdbc{:update-count 1}]
+       :pg [#:next.jdbc{:update-count 1}]
+UPDATE t SET a = 5.0;
+  :pdb-pdb [#:next.jdbc{:update-count 0}]
+   :pdb-pg [#:next.jdbc{:update-count 0}]
+       :pg [#:next.jdbc{:update-count 1}]
+DELETE FROM t;
+  :pdb-pdb [#:next.jdbc{:update-count 0}]
+   :pdb-pg [#:next.jdbc{:update-count 0}]
+       :pg [#:next.jdbc{:update-count 1}]
+SELECT * FROM t;
+  :pdb-pdb [{:a ##NaN}]
+   :pdb-pg [{:a ##NaN}]
+       :pg []
+
+```
+
+
 ## License
 
 Copyright © 2026 Jepsen, LLC

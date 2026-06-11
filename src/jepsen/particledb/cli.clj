@@ -18,7 +18,8 @@
                     [util :as util :refer [default]]]
             [jepsen.particledb [db :as db]
                                [nemesis :as nemesis]
-                               [pdb-client :as pdb-client]]
+                               [pdb-client :as pdb-client]
+                               [repl :as repl]]
             [jepsen.particledb.workload
              [compare :as compare]
              [internal-psql :as internal-psql]
@@ -447,6 +448,23 @@
     (rand/set-seed! seed))
   parsed)
 
+(def repro-watch-cmd
+  "Watch an SQL file and try to play it against both PG and
+  PDB. A VERY rough hack."
+  {"repro-watch"
+   {:opt-spec []
+    :opt-fn identity
+    :usage ""
+    :run (fn repro-watch-cmd [{:keys [options arguments]}]
+           (let [[node file] arguments
+                 file (or file "repro.sql")]
+             ; hack hack haaaaaack
+             (repl/open3! (or node "n9"))
+             (repl/repro-watch! file)
+             (info "Watching" file "for changes")
+             (while true
+               (Thread/sleep 1000))))}})
+
 (defn -main
   "Handles command line arguments. Can either run a test, or a web server for
   browsing results."
@@ -461,5 +479,6 @@
                         :opt-spec (cli/without-defaults-for
                                     [:workload :nemesis :lazyfs]
                                     cli-opts)})
-                     (cli/serve-cmd))
+                     (cli/serve-cmd)
+                     repro-watch-cmd)
               args))
