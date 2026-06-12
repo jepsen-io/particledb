@@ -41,7 +41,10 @@
       SQLException
       (condp re-find m
         #"PDB JDBC: null"
-        {:type :pdb-jdbc-null, :msg m, :definite? false}
+        {:type :pdb-jdbc-null, :msg m}
+
+        #"connection closed"
+        {:type :connection-closed}
 
         #"could not serialize access"
         {:type :could-not-serialize, :msg m, :definite? true}
