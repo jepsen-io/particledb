@@ -49,6 +49,9 @@
         #"current transaction is aborted, commands ignored"
         {:type :aborted, :msg m, :definite? true}
 
+        #"deadlock detected"
+        {:type :deadlock-detected, :msg m, :definite? true}
+
         #"duplicate key value"
         {:type :duplicate, :msg m, :definite? true}
 
