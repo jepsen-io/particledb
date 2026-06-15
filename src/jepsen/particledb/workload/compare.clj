@@ -254,6 +254,23 @@
                  ; PG threw an error
                  (and (map? pg) (:msg pg))
                  (condp re-find (:msg pg)
+                   ; You can order by something that's not in the agg fun
+                   ; TODO: repro this again
+                   #"column .+ must appear in the GROUP BY clause"
+                   "column must appear in group by"
+
+                   ; Or divide by zero
+                   #"division by zero"
+                   "division by zero"
+
+                   ; Want to ask if 0 = ':'? Sure, why not
+                   #"invalid input syntax"
+                   "invalid input syntax"
+
+                   ; What is type safety for, really?
+                   #"is of type .+"
+                   "wrong type"
+
                    ; We know about this: postgres won't let you have more than
                    ; one primary key on a table
                    #"multiple primary keys for table"
@@ -264,26 +281,13 @@
                    #"multiple assignments to same column"
                    "multiple assignments to same column"
 
-                   ; You can order by something that's not in the agg fun
-                   ; TODO: repro this again
-                   #"column .+ must appear in the GROUP BY clause"
-                   "column must appear in group by"
+                   ; `WHERE a` is apparently legal, even if a is an int.
+                   #"must be type"
+                   "must be type"
 
                    ; I... what... how even...
                    #"operator does not exist"
                    "operator does not exist"
-
-                   ; Want to ask if 0 = ':'? Sure, why not
-                   #"invalid input syntax"
-                   "invalid input syntax"
-
-                   ; What is type safety for, really?
-                   #"is of type .+"
-                   "wrong type"
-
-                   ; `WHERE a` is apparently legal, even if a is an int.
-                   #"must be type"
-                   "must be type"
 
                    ; ParticleDB doesn't do NOT NULL
                    #"violates not-null constraint"
@@ -301,37 +305,17 @@
                    #"out of range"
                    "out of range"
 
-                   ; Or divide by zero
-                   #"division by zero"
-                   "division by zero"
+                   #"operator is not unique"
+                   "operator not unique"
 
                    "unknown postgres error")
 
                  ; PDB threw an error
                  (and (map? pdb) (:msg pdb))
                  (condp re-find (:msg pdb)
-                   ; ParticleDB thinks WHERE NULL = TRUE isn't OK, but only
-                   ; sometimes`
-                   #"filter predicate must produce boolean"
-                   "filter predicate must produce boolean"
-
-                   ; Weirdly ParticleDB isn't OK comparing Boolean with Null.
-                   ; sometimes, even when PG is fine. Weird.
-                   #"Invalid comparison operation"
-                   "invalid comparison"
-
                    ; I guess you can't store infinity???
                    #"Bad value for type double"
                    "bad value for type double"
-
-                   ; Oh NOW you care about integer sizes!
-                   #"invalid integer"
-                   "invalid integer"
-
-                   ; I managed to drive PDB into a state once where it
-                   ; complained of this for any table mutation.
-                   #"non-nullable but contains null values"
-                   "non-nullable contains null"
 
                    ; Oh this is neat. All floating point numbers (e.g. 0.0,
                    ; 1.2, and Infinity) are considered duplicates for a unique
@@ -341,12 +325,38 @@
                    #"duplicate key value"
                    "duplicate key value"
 
-                   #"unsupported .+ operator"
-                   "unsupported operator"
+                   ; ParticleDB thinks WHERE NULL = TRUE isn't OK, but only
+                   ; sometimes`
+                   #"filter predicate must produce boolean"
+                   "filter predicate must produce boolean"
 
                    ; Oh *neat*
                    #"internal error"
                    "internal error"
+
+                   ; Weirdly ParticleDB isn't OK comparing Boolean with Null.
+                   ; sometimes, even when PG is fine. Weird.
+                   #"Invalid comparison operation"
+                   "invalid comparison"
+
+                   ; Oh NOW you care about integer sizes!
+                   #"invalid integer"
+                   "invalid integer"
+
+
+                   ; I managed to drive PDB into a state once where it
+                   ; complained of this for any table mutation.
+                   #"non-nullable but contains null values"
+                   "non-nullable contains null"
+
+                   #"overflow"
+                   "overflow"
+
+                   #"unsupported .+ operator"
+                   "unsupported operator"
+
+                   #"underflow"
+                   "underflow"
 
                    "unknown particledb error")
 
