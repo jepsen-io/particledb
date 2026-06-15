@@ -317,6 +317,9 @@
                    #"Bad value for type double"
                    "bad value for type double"
 
+                   #"could not serialize access"
+                   "could not serialize"
+
                    ; Oh this is neat. All floating point numbers (e.g. 0.0,
                    ; 1.2, and Infinity) are considered duplicates for a unique
                    ; constraint? This is hilarious given ParticleDB seems
