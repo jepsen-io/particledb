@@ -11,7 +11,8 @@
             [clojure.tools.logging :refer [info warn]]
             [com.gfredericks.test.chuck.generators :as g']
             [dom-top.core :refer [loopr]]
-            [jepsen [util :as util]]))
+            [jepsen [random :as rand]
+                    [util :as util]]))
 
 ;; Repl ideas
 #_(do
@@ -1077,7 +1078,7 @@
   ; We are *very* bad at shrinking schemas (for the usual test.check
   ; bind reasons), so we build a loop that gradually expands the
   ; schemas over time.
-  (info "Pass 1: standard test.check search")
+  (info "Pass 1: standard test.check search with seed" (:seed opts))
   (loop [max-table-count 1
          max-column-count 1]
     (info "Trying up to"
@@ -1157,36 +1158,51 @@
                 (when (every? #{:done} (vals pool0))
                   (swap! queue conj :stop))))))))))
 
-(defn worker
-  "Starts a test.check worker thread. Draws unique IDs from last-id, an atom
-  holding an integer. Sends cases to the given atom holding a PersistentQueue.
-  Options are:
+(defn gen-worker!
+  "Starts a generic test.check worker thread for `worker`."
+  [{:keys [pool seed] :as opts} last-id queue]
+  (let [worker-id (str "gen-" seed)]
+    (swap! pool assoc worker-id :running)
+    (future
+      (util/with-thread-name "jepsen test.check"
+        (try
+          (let [checked (worker-pass-1! opts last-id queue)]
+            (when-let [smallest (first (:smallest (:shrunk checked)))]
+              (worker-pass-2! opts last-id queue smallest)))
+          (catch Throwable t
+            (warn t "Jepsen test.check worker crashed!")
+            (throw t))
+          (finally
+            ; Mark ourselves as complete. If we're the last worker, tell the
+            ; generator queue it's OK to stop.
+            (let [pool0 (swap! pool assoc worker-id :done)]
+              (when (every? #{:done} (vals pool0))
+                (swap! queue conj :stop)))))))))
 
-      :test-cases The number of test cases to run
-      :seed       The random seed
+(defn worker
+  "Starts several test.check worker threads. Draws unique IDs from last-id, an
+  atom holding an integer. Sends cases to the given atom holding a
+  PersistentQueue. Options are:
+
+      :test-cases           The number of test cases to run
+      :seed                 The random seed
+      :concurrency          How many worker threads to spawn initially
       :max-statement-count  The maximum number of statements
       :max-table-count  The maximum number of tables
       :max-column-count The maximum number of columns
 
-  This worker manages other workers; it will spawn a series of origin workers
-  to chase down each unique origin it finds."
-  [opts last-id queue]
+  Workers will spawn a series of origin workers to chase down each unique
+  origin they find."
+  [{:keys [seed concurrency]
+    :or   {concurrency 1}
+    :as   opts}
+   last-id queue]
   (let [; This is a map of origin strings to origin worker states: initially
         ; :running, and :done when complete.
         pool (atom {:supervisor :running})
-        opts (assoc opts :pool pool)]
-  (future
-    (util/with-thread-name "jepsen test.check"
-      (try
-        (let [checked (worker-pass-1! opts last-id queue)]
-          (when-let [smallest (first (:smallest (:shrunk checked)))]
-            (worker-pass-2! opts last-id queue smallest)))
-        (catch Throwable t
-          (warn t "Jepsen test.check worker crashed!")
-          (throw t))
-        (finally
-          ; Mark ourselves as complete. If we're the last worker, tell the
-          ; generator queue it's OK to stop.
-          (let [pool0 (swap! pool assoc :supervisor :done)]
-            (when (every? #{:done} (vals pool0))
-              (swap! queue conj :stop)))))))))
+        opts (assoc opts :pool pool)
+        ; We want each worker to chase a different seed
+        rng   (rand/thread-local-random seed)
+        seeds (take concurrency (cons seed (repeatedly #(.nextLong rng))))]
+    (doseq [seed seeds]
+      (gen-worker! (assoc opts :seed seed) last-id queue))))

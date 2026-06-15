@@ -1179,6 +1179,7 @@
         ;               last-id
         ;               queue)]
         tc-worker (gen.tc/worker {:test-cases 10000
+                                  :concurrency (:concurrency opts)
                                   :seed (rand/long)
                                   :max-statement-count
                                   (:compare-max-statement-count opts)}
