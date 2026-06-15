@@ -826,8 +826,9 @@
            ; The tables we'll join *from*, in corresponding order
            (g/vector (g/elements tables) (count join-tables)))
          ; Ensure that we don't try to join tables to themselves
-         (g/such-that (fn [[ts ts']]
-                        (every? identity (map not= ts ts'))))
+         ; Actually, you know what? Maybe self-joins can be fun.
+         ;(g/such-that (fn [[ts ts']]
+         ;               (every? identity (map not= ts ts'))))
          ; Produce a vector of join clauses
          (bind (fn [[join-tables from-tables]]
                  (apply g/tuple (mapv (partial gen-select-join schema)
@@ -1077,7 +1078,7 @@
   ; bind reasons), so we build a loop that gradually expands the
   ; schemas over time.
   (info "Pass 1: standard test.check search")
-  (loop [max-table-count 2
+  (loop [max-table-count 1
          max-column-count 1]
     (info "Trying up to"
           max-table-count "tables and"
