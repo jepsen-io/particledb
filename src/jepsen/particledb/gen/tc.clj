@@ -1199,7 +1199,7 @@
    last-id queue]
   (let [; This is a map of origin strings to origin worker states: initially
         ; :running, and :done when complete.
-        pool (atom {:supervisor :running})
+        pool (atom {})
         opts (assoc opts :pool pool)
         ; We want each worker to chase a different seed
         rng   (rand/thread-local-random seed)
