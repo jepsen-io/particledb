@@ -328,6 +328,11 @@
                    #"invalid integer"
                    "invalid integer"
 
+                   ; I managed to drive PDB into a state once where it
+                   ; complained of this for any table mutation.
+                   #"non-nullable but contains null values"
+                   "non-nullable contains null"
+
                    ; Oh this is neat. All floating point numbers (e.g. 0.0,
                    ; 1.2, and Infinity) are considered duplicates for a unique
                    ; constraint? This is hilarious given ParticleDB seems
