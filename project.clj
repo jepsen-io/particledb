@@ -9,7 +9,7 @@
                  [io.jepsen/sql "0.1.0-SNAPSHOT"]
                  [io.jepsen/postgres "0.1.2-SNAPSHOT"
                   :exclusions [jepsen]]
-                 [ai.particledb/particledb-jdbc "1.0.0"
+                 [ai.particledb/particledb-jdbc "1.0.1"
                   :exclusions [org.slf4j/slf4j-api]]
                  [com.gfredericks/test.chuck "0.2.15"]
                  [com.aphyr/hegel-clj "0.1.0-SNAPSHOT"]
