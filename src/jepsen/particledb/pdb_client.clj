@@ -11,6 +11,7 @@
   (:import (clojure.lang ExceptionInfo)
            (java.net SocketException)
            (java.sql SQLException)
+           (java.util.concurrent ExecutionException)
            (org.particledb Driver)))
 
 (defn open
@@ -29,14 +30,12 @@
 (defn error-fn
   "Turns ParticleDB exceptions into error maps."
   [e]
+  (info "error-fn" (class e) (.getMessage e))
   (let [m (.getMessage e)]
     (condp identical? (class e)
-      SocketException
-      (condp re-find m
-        "Connection reset"
-        {:type :conn-reset}
-
-        nil)
+      ; We want to see through executionexceptions to their causes
+      ExecutionException
+      (recur (.getCause e))
 
       SQLException
       (condp re-find m
@@ -58,13 +57,21 @@
         #"duplicate key value"
         {:type :duplicate, :msg m, :definite? true}
 
+        #"Connection reset"
+        {:type :connection-reset}
+
         nil)
 
       ExceptionInfo
       (let [data (ex-data e)]
         (cond (re-find #"Rollback failed handling" m)
               ; Ah, let's look at the root cause
-              (recur (:handling data))
+              (do ; This is broken; let's try to get some debugging info for
+                  ; next time
+                  ;(info "Ex-info handling:"
+                  ;      (class (:handling data))
+                  ;      (pr-str (:handling data)))
+                  (recur (:handling data)))
 
               true
               nil))
