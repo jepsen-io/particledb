@@ -26,7 +26,8 @@
              [repro-character-dups :as repro-character-dups]
              [repro-missing-rows :as repro-missing-rows]]
             [jepsen.postgres [cli :as pcli]]
-            [jepsen.os.debian :as debian]))
+            [jepsen.os.debian :as debian]
+            [jepsen.sql [encoding :as encoding]]))
 
 (def wal-sync-modes
   "The set of WAL sync modes supported by ParticleDB"
@@ -309,6 +310,16 @@
      [nil "--corrupt-file-type TYPE" "What kind of files to corrupt. See nemesis/file-types."
       :parse-fn keyword
       :validate [nemesis/file-types (cli/one-of nemesis/file-types)]]
+
+     ; Not sure whether we should do this or not; ParticleDB could just
+     ; implement support for decimals.
+     #_(let [encodings (-> (mapv :name encoding/all-encodings)
+                         set
+                         (disj :decimal))]
+       [nil "--encodings ENCODING_NAMES" "The various ways we can encode values in SQL columns. I don't think ParticleDB can handle decimals, so we'll skip that one."
+        :default (sort encodings)
+        :parse-fn parse-comma-kws
+        :validate [(partial every? encodings) (cli/one-of encodings)]])
 
      [nil "--expected-consistency-model MODEL" "What level of isolation do we *expect* to observe? Defaults are chosen based on wal-sync-mode and txn-mode."
       :parse-fn keyword]
