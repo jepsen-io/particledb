@@ -63,10 +63,17 @@
           (c/exec :cp path bin)))
       (c/exec :chmod :+x bin))))
 
+(defn kill!
+  "Kills the ParticleDB process."
+  []
+  (info "Killing ParticleDB")
+  (c/su (cu/grepkill! :kill bin-name))
+  :killed)
+
 (defn wipe!
   "Kills and wipes data on a node."
   [test node]
-  (db/kill! (:db test) test node)
+  (kill!)
   (c/su (c/exec :rm :-rf data-dir log-file (str log-file ".plain") pid-file))
   :wiped)
 
@@ -122,9 +129,9 @@
 
   db/Kill
   (kill! [_ test node]
-    (info "Killing ParticleDB")
-    (c/su (cu/grepkill! :kill bin-name))
-    (when (:lazyfs test)
+    (kill!)
+    (when (and (:lazyfs test)
+               (lazyfs/mounted? lazyfs))
       (lazyfs/lose-unfsynced-writes! lazyfs))
     :killed)
 
