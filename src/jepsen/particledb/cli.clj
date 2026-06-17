@@ -385,6 +385,14 @@
       :parse-fn read-string
       :validate [pos? "Must be a positive number."]]
 
+     [nil "--row-store-memory-limit MB" "The row store memory limit, in
+                                        megabytes. If unset, lets ParticleDB
+      run with the default, which I think means everything in RAM, so we set
+      this to 1 MB; hopefully that means we actually exercise the disk paths."
+      :default 1
+      :parse-fn parse-long
+      :validate [(complement neg?) "Must not be negative."]]
+
      ; Right now ParticleDB doesn't support savepoints.
      [nil "--[no-]savepoints" "Does this database support savepoints?"
       :default false]

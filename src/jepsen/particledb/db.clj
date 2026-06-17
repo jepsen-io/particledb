@@ -145,12 +145,15 @@
          ;:--pg-password (:postgres-password test)
          ; So let's try turning off auth entirely
          :--no-auth
-         (when-let [m (:wal-sync-mode test)] [:--wal-sync-mode (name m)])
-         (when-let [m (:txn-mode test)]      [:--txn-mode      (name m)])
          ; This makes it deeply frustrating to debug because we constantly have
-         ; connections closing. Also I don't think this option does  anything.
+         ; connections closing. Alas... I don't think this option does anything.
          :--connection-timeout 10000
          :--max-connections 16384
+         (when-let [m (:wal-sync-mode test)] [:--wal-sync-mode (name m)])
+         (when-let [m (:txn-mode test)]      [:--txn-mode      (name m)])
+         (when-let [l (:row-store-memory-limit test)]
+           [:--row-store-memory-limit l
+            :--enable-cold-storage])
          ; Clustering options
          (when (cluster? test)
            [; This is baffling. The internal operator guide says
