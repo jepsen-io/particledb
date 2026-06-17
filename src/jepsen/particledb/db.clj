@@ -154,6 +154,10 @@
          (when-let [l (:row-store-memory-limit test)]
            [:--row-store-memory-limit l
             :--enable-cold-storage])
+         ; Since we're trying to use the "partition-pinned" zerocopy-occ, we
+         ; probably need to have... some OLTP partitions? The default is to
+         ; have none, so let's turn that up.
+         :--oltp-partitions 5
          ; Clustering options
          (when (cluster? test)
            [; This is baffling. The internal operator guide says
