@@ -40,6 +40,10 @@
   "ParticleDB data directory"
   (str dir "/data"))
 
+(def grpc-port
+  "The GRPC port ParticleDB uses."
+  26257)
+
 (defn install!
   "Install ParticleDB"
   [test]
@@ -65,6 +69,16 @@
   (db/kill! (:db test) test node)
   (c/su (c/exec :rm :-rf data-dir log-file (str log-file ".plain") pid-file))
   :wiped)
+
+(defn cluster?
+  "Are we running a single node or multiple?"
+  [test]
+  (< 1 (count (:nodes test))))
+
+(defn node-id
+  "The node ID of this node in the given test."
+  [test node]
+  (.indexOf ^java.util.List (:nodes test) node))
 
 (defrecord DB [lazyfs]
   db/DB
@@ -119,7 +133,9 @@
       (cu/start-daemon!
         {:logfile log-file
          :pidfile pid-file
-         :chdir   dir}
+         :chdir   dir
+         :env (when (cluster? test)
+                {:PDB_RAFT_WAL "1"})}
          bin
          :start
          :--data-dir data-dir
@@ -134,7 +150,32 @@
          ; This makes it deeply frustrating to debug because we constantly have
          ; connections closing. Also I don't think this option does  anything.
          :--connection-timeout 10000
-         :--max-connections 16384))))
+         :--max-connections 16384
+         ; Clustering options
+         (when (cluster? test)
+           [; This is baffling. The internal operator guide says
+            ; that you need to provide --pg-advertise-addr because "that's what
+            ; the leader will tell clients on follower-redirect, and clients
+            ; can't route to 0.0.0.0". But as I understood it, the ParticleDB
+            ; client used its own wire protocol, not the Postgres protocol, so
+            ; why is this... the specific option? And Postgres clients don't...
+            ; at least as far as I know... have any sort of follower
+            ; redirection thing; they expect the server to handle proxying
+            ; requests. So what happens if you *do* connect a regular PG client
+            ; to this cluster? Guess we'll find out.
+            ;
+            ; Sometimes writing code against LLM-generated documentation feels
+            ; like an expedition through the Library of Babel.
+            :--pg-advertise-addr  (str (cn/ip node) ":" (:postgres-port test))
+            ; Docs say we should pass this, but the binary says no such option.
+            :--replication-mode   "sync"
+            :--node-id            (node-id test node)
+            :--peers              (->> (:nodes test)
+                                       (remove #{node})
+                                       (map (fn [node]
+                                              (str (node-id test node)
+                                                   "=" node ":" grpc-port)))
+                                       (str/join ","))])))))
 
 (defn db
   "Constructs a new DB for the test, given CLI opts."
