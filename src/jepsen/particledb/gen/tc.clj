@@ -649,9 +649,7 @@
   "Generates an UPDATE statement."
   [schema]
   (g/let [table (g/elements (:tables schema))
-          ; TODO: generate duplicate assignments.
-          pairs (let [pairs (gen-update-pair schema table)
-                      n     (count (:cols table))]
+          pairs (let [n (count (:cols table))]
                   (rarely
                     ; With dups
                     (g/vector (gen-update-pair schema table) 1 (inc n))
