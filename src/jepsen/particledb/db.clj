@@ -67,7 +67,7 @@
   "Kills the ParticleDB process."
   []
   (info "Killing ParticleDB")
-  (c/su (cu/grepkill! :kill bin-name))
+  (c/su (cu/kill-bin! :KILL bin))
   :killed)
 
 (defn wipe!
@@ -120,11 +120,11 @@
 
   db/Pause
   (pause! [_ test node]
-    (c/su (cu/grepkill! :stop bin-name))
+    (c/su (cu/kill-bin! :STOP bin))
     :paused)
 
   (resume! [_ test node]
-    (c/su (cu/grepkill! :cont bin-name))
+    (c/su (cu/kill-bin! :CONT bin))
     :resumed)
 
   db/Kill
