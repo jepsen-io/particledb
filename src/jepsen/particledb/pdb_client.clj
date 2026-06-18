@@ -45,6 +45,9 @@
         #"connection closed"
         {:type :connection-closed}
 
+        #"Connection reset"
+        {:type :connection-reset}
+
         #"could not serialize access"
         {:type :could-not-serialize, :msg m, :definite? true}
 
@@ -57,8 +60,11 @@
         #"duplicate key value"
         {:type :duplicate, :msg m, :definite? true}
 
-        #"Connection reset"
-        {:type :connection-reset}
+        #"multiple primary keys .+ are not allowed"
+        {:type :multiple-primary-keys, :definite? true}
+
+        #"table not found"
+        {:type :table-not-found, :msg m, :definite? true}
 
         nil)
 
@@ -74,7 +80,7 @@
                   (recur (:handling data)))
 
               true
-              nil))
+              data))
       nil)))
 
 (def workloads
