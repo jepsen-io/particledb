@@ -13,7 +13,7 @@
                     [random :as rand]
                     [store :as store]]
             [jepsen.control.core :as cc]
-            [jepsen.sql.internal :as internal]))
+            [jepsen.sql.workload.internal :as internal]))
 
 (def slow-delay
   1)
