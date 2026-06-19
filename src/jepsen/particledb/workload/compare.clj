@@ -289,26 +289,29 @@
                    #"operator does not exist"
                    "operator does not exist"
 
+                   ; You can select nonexistent columns!
+                   #"column .+ does not exist"
+                   "column does not exist"
+
+                   #"operator is not unique"
+                   "operator not unique"
+
+                   ; And put giant floats into tiny integer fields
+                   #"out of range"
+                   "out of range"
+
+                   #"overflow"
+                   "overflow"
+
+                   "unknown postgres error"
+
                    ; ParticleDB doesn't do NOT NULL
                    #"violates not-null constraint"
                    "not-null constraint"
 
                    ; Or duplicate constraints
                    #"violates unique constraint"
-                   "unique constraint"
-
-                   ; You can select nonexistent columns!
-                   #"column .+ does not exist"
-                   "column does not exist"
-
-                   ; And put giant floats into tiny integer fields
-                   #"out of range"
-                   "out of range"
-
-                   #"operator is not unique"
-                   "operator not unique"
-
-                   "unknown postgres error")
+                   "unique constraint")
 
                  ; PDB threw an error
                  (and (map? pdb) (:msg pdb))
@@ -346,11 +349,13 @@
                    #"invalid integer"
                    "invalid integer"
 
-
                    ; I managed to drive PDB into a state once where it
                    ; complained of this for any table mutation.
                    #"non-nullable but contains null values"
                    "non-nullable contains null"
+
+                   #"out of range"
+                   "out of range"
 
                    #"overflow"
                    "overflow"
@@ -470,8 +475,8 @@
 ;            :interesting, :invalid, :or :valid
 ;  }
 
-(defrecord HegelGen [; A mutable queue of test cases Hegel wants us to try. An
-                     ; atom to a PersistentQueue.
+(defrecord QueueGen [; A mutable queue of test cases someone wants us to try.
+                     ; An atom to a PersistentQueue.
                      queue
                      ; A map of case id -> result-promise. As operations
                      ; complete, we deliver their results to these promises.
@@ -505,14 +510,15 @@
           (assoc this :results
                  (assoc results (:id queue-case) (:result queue-case))))
 
-        ; When we complete an sql event, we'll send its result back to Hegel.
+        ; When we complete an sql event, we'll send its result back to the
+        ; promise
         :ok
         (let [id     (:id (:value event))
               result (get results id)
               _ (assert result)
               status (:status (:value event))
               _ (assert (keyword? status))]
-          ; Send back to Hegel
+          ; Send back
           (deliver result (select-keys (:value event) [:status :origin]))
           ; If we get an interesting case, write it right now.
           (when (= :interesting status)
@@ -535,533 +541,11 @@
       ; Not an sql op
       this)))
 
-
-(defn hegel-gen
-  "A generator that draws operations from Hegel. Takes an atom with a
-  PersistentQueue of test cases."
+(defn queue-gen
+  "A generator that draws operations from a queue. Takes an
+  atom with a PersistentQueue of test cases."
   [queue]
-  (HegelGen. queue {}))
-
-;; SQL generators ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defmacro gen-branch
-  "Evaluates one of n branches based on Hegel."
-  [& branches]
-  (let [n (count branches)]
-    (case n
-      0 nil
-      1 (first branches)
-      `(hc/with-span
-         (case (hc/gen (g/integer 0 ~(dec n)))
-           ~@(->> branches
-                  (map-indexed (fn [i form]
-                                 [i `(hc/with-span ~form)]))
-                  (mapcat identity)))))))
-
-(defn gen-nth
-  "Picks a random element of the given vector."
-  [xs]
-  (hc/with-span
-    (g/let [i (g/integer 0 (dec (count xs)))]
-      (nth xs i))))
-
-(def column-names
-  "What we call columns"
-  ["a" "b" "c" "d" "e"])
-
-(def table-names
-  "What we call tables"
-  ["t" "u" "v"])
-
-(def gen-column-types
-  "A schema to generate column types."
-  (g/one-of
-    (g/constant :boolean)
-    (g/constant :smallint) ; 2 bytes
-    (g/constant :bigint)   ; 8 bytes
-    (g/constant :real)
-    (g/constant :double)
-    (g/constant :text)))
-
-(def all-types
-  "All possible types."
-  #{:smallint :bigint :real :double :boolean :text})
-
-(def num-types
-  "All numeric types"
-  #{:smallint :bigint :real :double})
-
-(defn general-type
-  "Generalize a type up to a set of compatible types."
-  [type]
-  (case type
-    :smallint num-types
-    :bigint   num-types
-    :int      num-types
-    :real     num-types
-    :double   num-types
-    type))
-
-(def gen-boolean-lit
-  "A schema for boolean literals"
-  (g/one-of (g/constant "TRUE")
-            (g/constant "FALSE")))
-
-(def gen-string-lit
-  "A schema for string literals. We're not going to go crazy here--I assume
-  there are parser bugs galore to be found with weird strings in ParticleDB,
-  but I feel like escaping might be more work than it's worth right now."
-  (g/fmap (fn [s] (str "'" s "'"))
-          (g/regex #"[A-Za-z0-9\- _]+"
-                   {:full-match? true})))
-
-; ParticleDB's integers are... weird. I think internally it maps everything to
-; an int64. You can happily assign larger numbers to any int type, including a
-; smallint, and it will clip them to 9223372036854775807, which is the biggest
-; 64-bit signed int.
-(def gen-int-lit
-  "A schema for integer literals."
-  ; These are one bigger than the actual integer bounds
-  (g/integer -2147483649 2147483648))
-
-(def gen-smallint-lit
-  "A schema for 2-byte int literals."
-  ; These are one bigger than the actual bounds
-  (g/integer -32769 32768))
-
-(def gen-bigint-lit
-  "A schema for 8-byte int literals."
-  ; These are one bigger than the actual bounds
-  (g/integer -9223372036854775809 9223372036854775808))
-
-(defn float->str
-  "Converts a float to an SQL string."
-  [f]
-  (cond
-    (NaN? f)      "'NaN'"
-    (infinite? f) (str "'" (str f) "'")
-    true          (str f)))
-
-(def gen-real-lit
-  "A schema for `real` float literals."
-  (g/fmap float->str (g/float {:width 32})))
-
-(def gen-double-lit
-  "A schema for `double` float literals."
-  (g/fmap float->str (g/float {:width 64})))
-
-(def gen-absurd-float-lit
-  "A schema for a truly ludicrous float."
-  (g/constant "1.234E400"))
-
-(defn almost-always
-  "A generator which is almost always one thing, but rarely another."
-  [common rare]
-  (g/bind (fn [f]
-            (if (< 0.99 f)
-              rare
-              common))
-          (g/float 0 1)))
-
-(defn gen-lit-
-  "Generates a literal value for a column schema, based on its type."
-  [type]
-  (if (set? type)
-    (recur (gen-nth (vec type)))
-    (hc/with-span
-      (hc/gen
-        (case type
-          :int      gen-int-lit
-          :smallint gen-smallint-lit
-          :bigint   gen-bigint-lit
-          ; For PG, 32-bit IEEE 754
-          :real     (almost-always gen-real-lit gen-absurd-float-lit)
-          ; For PG, 64-bit IEEE 754
-          :double   (almost-always gen-double-lit gen-absurd-float-lit)
-          :text     gen-string-lit
-          :boolean  gen-boolean-lit
-          )))))
-
-(defn gen-lit
-  "Generates a possibly NULL literal value of the given type."
-  [type]
-  (hc/with-span
-    (g/let [nullp (g/float 0 1)]
-      (if (< 0.9 nullp)
-        "NULL"
-        (gen-lit- type)))))
-
-(defn gen-expr-leaf
-  "Generates a simple expression of the given type which is valid in the given
-  table. For instance, 2, 'foo', or a, assuming a is a column of the right
-  type."
-  [table type]
-  (gen-branch
-    ; Literal
-    (gen-lit type)
-    ; Column
-    (->> (:cols table)
-         (filter (if (keyword? type)
-                   ; Direct keyword match
-                   (comp #{type} :type)
-                   ; Predicate
-                   (comp type :type)))
-         (map (comp g/constant :name))
-         (apply g/one-of)
-         hc/gen)
-    ; Sometimes, make up a random name just for grins. I can't believe this
-    ; actually works in ParticleDB, but it does. We choose a-f so that we
-    ; *mostly* generate real column names, but sometimes of the wrong type, and
-    ; sometimes ones that don't exist.
-    (hc/gen (g/regex "[a-f]" {:full-match? true}))))
-
-(defn gen-type
-  "Generates a type thats in the given table."
-  [table]
-  (hc/with-span
-    (->> (:cols table)
-         (map :type)
-         distinct
-         (map g/constant)
-         (apply g/one-of)
-         (g/fmap general-type)
-         hc/gen)))
-
-;; Expression generating
-
-(declare gen-expr)
-
-;; Numeric expressions
-
-(declare gen-expr-num)
-
-(defn gen-expr-num-binary
-  "Generates a binary numeric expression, like (1 + b)"
-  [table]
-  (hc/with-span
-    (g/let [a  (gen-expr-num table)
-            b  (gen-expr-num table)
-            op (apply g/one-of (mapv g/constant ["+" "-" "*" "/" "%" "^"]))]
-      (str "(" a " " op " " b ")"))))
-
-(defn gen-expr-num
-  "Generates a numeric expression, like 4, a, or (a - b)"
-  [table]
-  (hc/with-span
-    (gen-branch
-      (gen-expr-leaf table num-types)
-      (gen-expr-num-binary table))))
-
-;; Boolean expressions
-
-(declare gen-expr-boolean)
-
-(def binary-comparators
-  "A schema for binary comparators like <, =, !=, ..."
-  (apply g/one-of
-         (mapv g/constant
-               ["=" "!=" "<" ">" "<=" ">="])))
-
-(defn gen-expr-boolean-null
-  "Generates a boolean expression which checks for null."
-  [table]
-  (hc/with-span
-    (g/let [not? (g/boolean)]
-      (str "(" (gen-expr table all-types) " IS " (when not? "NOT ")
-           "NULL)"))))
-
-(defn gen-expr-boolean-comp
-  "Generates a boolean expression which compares things."
-  [table]
-  (hc/with-span
-    (g/let [same-type? (g/boolean)
-            type       (gen-type table)
-            a          (gen-expr table type)
-            b          (gen-expr table (if same-type?
-                                         type
-                                         (gen-type table)))
-            op binary-comparators]
-      (str "(" a " " op " " b ")"))))
-
-(defn gen-expr-boolean-branch
-  "Generates a compound boolean expression using AND/OR/NOT"
-  [table]
-  (gen-branch
-    (str "NOT " (gen-expr-boolean table))
-    (str "(" (gen-expr-boolean table) " OR " (gen-expr-boolean table) ")")
-    (str "(" (gen-expr-boolean table) " AND " (gen-expr-boolean table) ")")))
-
-(defn gen-expr-boolean
-  "Generates a boolean expression, either leaf or branch."
-  [table]
-  (gen-branch
-    (gen-expr-leaf table :boolean)
-    (gen-expr-boolean-comp table)
-    (gen-expr-boolean-null table)
-    (gen-expr-boolean-branch table)))
-
-(defn gen-expr
-  "Generates an expression of the given type in the table."
-  [table type]
-  (hc/with-span
-    (case type
-      :boolean  (gen-expr-boolean table)
-      :smallint (gen-expr-num table)
-      :int      (gen-expr-num table)
-      :bigint   (gen-expr-num table)
-      :real     (gen-expr-num table)
-      :double   (gen-expr-num table)
-      num-types (gen-expr-num table)
-      (gen-expr-leaf table type))))
-
-(defn gen-column-schema
-  "Generates a column schema. A column schema is a map of the form:
-
-  {:name         \"c1\"
-   :type         :int
-   :not-null?    false
-   :unique?      false
-   :primary-key? true}"
-  [name]
-  (hc/with-span
-    (g/let [type         gen-column-types
-            not-null?    (g/boolean)
-            unique?      (g/boolean)
-            primary-key? (g/boolean)]
-      (cond-> {:name name
-               :type type}
-        not-null?    (assoc :not-null? true)
-        unique?      (assoc :unique? true)
-        primary-key? (assoc :primary-key? true)))))
-
-(defn column-schema->sql
-  "Turns a column schema into the SQL to create it."
-  [{:keys [type primary-key? unique? not-null?] :as col}]
-  (str (:name col) " "
-       (case type
-         :double "double precision"
-         (name type))
-       (when not-null? " NOT NULL")
-       (when unique? " UNIQUE")
-       (when primary-key? " PRIMARY KEY")))
-
-(defn gen-table-schema
-  "Generates a table schema. A table schema is a map of the form:
-
-  {:name \"c1\"
-   :cols [column-schema ...]}"
-  [name]
-  (hc/with-span
-    {:name name
-     :cols (first
-             (g/collect [[cols i pk?] [[] 0 false]
-                         {:min-size 1, :max-size 4}]
-                        (let [col (gen-column-schema (column-names i))]
-                          (if (and pk? (:primary-key? col)
-                                   ; ParticleDB is happy to let us do several
-                                   ; primary keys, but we don't want to stop
-                                   ; there, so we make these errors relatively
-                                   ; rare.
-                                   (< 0.01 (hc/gen (g/float 0 1))))
-                            :hegel-clj/reject
-                            [(conj cols col)
-                             (inc i)
-                             (or pk? (:primary-key? col))]))))}))
-
-(defn table-schema->sql
-  "Turns a table schema into the SQL to create it."
-  [{:keys [name cols]}]
-  (str "CREATE TABLE " name " ("
-       (str/join ", " (map column-schema->sql cols)) ")"))
-
-(defn gen-schema
-  "Generates a schema. A schema is a vector of table schemas."
-  [id]
-  (second
-    (g/collect [[i tables] [0, []]
-                {:min-size 1, :max-size 3}]
-               ; So our table names are always unique
-               [(inc i)
-                (conj tables
-                      (gen-table-schema (str (table-names i) "_" id)))])))
-
-(defn schema->create-sql
-  "Turns a schema into the SQL statements to create it."
-  [schema]
-  (mapv table-schema->sql schema))
-
-(defn schema->teardown-sql
-  "Turns a schema into the teardown SQL statements to destroy it."
-  [schema]
-  (mapv (fn [{:keys [name]}]
-          (str "DROP TABLE IF EXISTS " name))
-        schema))
-
-(defn gen-insert
-  "Generates an INSERT statement."
-  [schema]
-  (g/let [table (gen-nth schema)
-          cols  (g/shuffle (g/constant (:cols table)))]
-    (str "INSERT INTO " (:name table)
-         " (" (str/join ", " (map :name cols)) ")"
-         " VALUES (" (str/join ", " (mapv (comp gen-lit :type) cols)) ")")))
-
-
-(defn gen-where?
-  "Maybe generates a WHERE clause"
-  [table]
-  (hc/with-span
-    (gen-branch
-      ""
-      (str " WHERE " (gen-expr-boolean table)))))
-
-(defn gen-update
-  "Generates an UPDATE statement."
-  [schema]
-  (hc/with-span
-    (let [table   (gen-nth schema)
-          cols    (:cols table)
-          col-gen (apply g/one-of (mapv g/constant (:cols table)))]
-      (g/let [; ParticleDB doesn't mind setting a = 1, a = 2, but PG does, and
-              ; that's noisy.
-              col-is (g/vector {:unique? (< (hc/gen (g/float 0 1)) 0.01)
-                                :min-size 1
-                                :max-size (count cols)}
-                               (g/integer 0 (dec (count cols))))
-              cols   (map cols col-is)
-              where? (gen-where? table)]
-        (str "UPDATE " (:name table) " SET "
-             (->> cols
-                  (mapv (fn [col]
-                          (let [v (gen-branch
-                                    ; Either a literal
-                                    (gen-lit (:type col))
-                                    ; Or another column in the table
-                                    (:name (hc/gen col-gen)))]
-                            (str (:name col) " = " v))))
-                  (str/join ", "))
-             where?)))))
-
-(defn gen-limit?
-  "Maybe generates a LIMIT clause"
-  []
-  (g/fmap (fn [[limit? i]]
-            (when limit?
-              (str " LIMIT " i)))
-          (g/tuple (g/boolean)
-                   (g/integer 0 1024))))
-
-(defn gen-offset?
-  "Maybe generate an OFFSET clause"
-  []
-  (g/fmap (fn [[offset? i]]
-            (when offset?
-              (str " OFFSET " i)))
-          (g/tuple (g/boolean)
-                   (g/integer 0 16))))
-
-(defn gen-order?
-  "Maybe generates an ORDER BY clause"
-  [table]
-  (g/fmap (fn [[order? i dir]]
-            (when order?
-              (str " ORDER BY " (:name (nth (:cols table) i)) " "
-                   (if dir "ASC" "DESC"))))
-          (g/tuple (g/boolean)
-                   (g/integer {:min 0, :max (dec (count (:cols table)))})
-                   (g/boolean))))
-
-(defn gen-select-cols
-  "Generates the list of columns to select from a table, like 'a, b' or '*'"
-  [table]
-  (let [cols (:cols table)]
-    (g/one-of
-      (g/constant "*")
-      (->> (g/vector {:min-size 1, :max-size 4}
-                     (g/integer 0 (dec (count cols))))
-           (g/fmap (fn [is]
-                     (->> is
-                          (map (comp :name cols))
-                          (str/join ", ")))))
-      (g/constant "COUNT(*)"))))
-
-(defn gen-select
-  "Generates a select statement."
-  [schema]
-  (hc/with-span
-    (g/let [table  (gen-nth schema)
-            cols   (gen-select-cols table)
-            where  (gen-where? table)
-            order  (gen-order? table)
-            limit  (gen-limit?)
-            offset (gen-offset?)]
-      (str "SELECT " cols " FROM " (:name table)
-           where
-           order
-           limit
-           offset))))
-
-(defn gen-delete
-  "Generates a DELETE statement."
-  [schema]
-  (hc/with-span
-    (g/let [table (gen-nth schema)
-            where (gen-where? table)]
-      (str "DELETE FROM " (:name table) where))))
-
-(defn gen-statement
-  "Generates an SQL statement for a schema."
-  [schema]
-  ; I don't know a good way to debias this in Hegel--it wants to pick the first
-  ; option, or 0 in a range of integers, like 4x more than any other option.
-  ; That makes it really hard to get to bugs with multiple inserts.
-  (g/let [f (g/one-of (g/constant gen-select)
-                      (g/constant gen-insert)
-                      (g/constant gen-insert)
-                      (g/constant gen-insert)
-                      (g/constant gen-update)
-                      (g/constant gen-update)
-                      (g/constant gen-update)
-                      (g/constant gen-delete))]
-    (f schema)))
-
-(defn gen-case
-  "Generates a test case for a unique integer ID. A case is a map of:
-
-  :id           A unique integer id
-  :sql          A vector of SQL statements
-  :teardown-sql A vector of SQL statements to tear down what this made."
-  [id]
-  (let [schema (gen-schema id)]
-    {:id  id
-     ; I don't quite know how to convince Hegel to generate long traces using
-     ; new_collection--it almost always wants short histories of just a couple
-     ; statements, and that doesn't find bugs well.
-     :sql (g/collect [sqls (schema->create-sql schema)
-                      {:min-size 1 :max-size 512}]
-                      (conj sqls (gen-statement schema)))
-     ;:sql (g/let [scale (apply g/one-of (mapv g/constant [1 10 100]))
-     ;             n     (g/integer scale (* scale 10))]
-     ;       (hc/with-span
-     ;         (prn :scale scale :n n)
-     ;         (into [] (take n (repeatedly (partial gen-statement schema))))
-     ;         (->> #(gen-statement schema) repeatedly (take n) (into []))))
-     :teardown-sql (schema->teardown-sql schema)}))
-
-;; Debugging
-
-(defn sample-cases
-  "Generates a few random cases with Hegel. Helpful for debugging at the repl."
-  [n]
-  (hc/sample n (gen-case 0)))
-
-(defn sample-exprs
-  "Generates a few random expressions with Hegel. Helpful for debugging."
-  [n]
-  (hc/sample n
-             (let [schema (gen-schema 0)
-                   table  (gen-nth schema)]
-               (gen-statement schema))))
+  (QueueGen. queue {}))
 
 ;; Checker
 
@@ -1141,43 +625,11 @@
        :interesting interesting
        :final final})))
 
-;; Plumbing
-
-(defn hegel-worker
-  "Starts a Hegel test in a future. Draws unique IDs from last-id, an atom to
-  an integer. Sends cases to the given atom with a PersistentQueue."
-  [test-opts last-id queue]
-  (future
-    (util/with-thread-name "jepsen hegel"
-      (loop []
-        ; Keep hunting until we find new bugs
-        (let [res (hc/run-test! test-opts
-                                (g/let [id        (swap! last-id inc)
-                                        result    (promise)
-                                        test-case (gen-case id)]
-                                  ; Send case to generator.
-                                  (swap! queue conj (assoc test-case
-                                                           :final? (hc/final?)
-                                                           :result result))
-                                  ; And wait for Jepsen to evaluate it.
-                                  @result))]
-          (info "Hegel complete:" (with-out-str (pprint res)))
-          (if false ;(every? #(not= "unknown" (:origin %)) (:final res))
-            (do (info "Trying again to see if we can find new bugs")
-                (recur))
-            ; Done
-            (swap! queue conj :stop)))))))
-
 (defn workload
   "Constructs a workload given CLI options."
   [opts]
   (let [last-id (atom -1)
         queue   (atom PersistentQueue/EMPTY)
-        ;hegel-worker (hegel-worker
-        ;               {:test-cases 10000
-        ;                :seed (rand/long)}
-        ;               last-id
-        ;               queue)]
         tc-worker (gen.tc/worker {:test-cases 10000
                                   :concurrency (:concurrency opts)
                                   :seed (rand/long)
@@ -1186,5 +638,5 @@
                                  last-id
                                  queue)]
     {:client    (Client. nil nil nil)
-     :generator (hegel-gen queue)
+     :generator (queue-gen queue)
      :checker   (Checker.)}))
