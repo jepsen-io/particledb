@@ -9,6 +9,7 @@ ssh $HOST bash -c "'killall -9 particledb; mkdir -p /opt/particledb'" &&
 scp $1 $HOST:/opt/particledb/particledb &&
 ssh $HOST bash -c "'cd /opt/particledb; \
   rm -rf daemon.log data; \
+  chmod +x particledb \
   start-stop-daemon --start \
   --chdir /opt/particledb \
   --background \
