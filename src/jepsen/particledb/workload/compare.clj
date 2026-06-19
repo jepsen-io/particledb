@@ -7,8 +7,6 @@
                      [string :as str]]
             [clojure.tools.logging :refer [info warn]]
             [dom-top.core :refer [loopr]]
-            [hegel-clj [core :as hc]
-                       [generator :as g]]
             [jepsen [control :as c]
                     [checker :as checker]
                     [client :as client]
@@ -320,8 +318,14 @@
                    #"Bad value for type double"
                    "bad value for type double"
 
+                   #"complex result"
+                   "complex result"
+
                    #"could not serialize access"
                    "could not serialize"
+
+                   #"division by zero"
+                   "division by zero"
 
                    ; Oh this is neat. All floating point numbers (e.g. 0.0,
                    ; 1.2, and Infinity) are considered duplicates for a unique
