@@ -360,6 +360,9 @@
                    #"overflow"
                    "overflow"
 
+                   #"type mismatch"
+                   "type mismatch"
+
                    #"unsupported .+ operator"
                    "unsupported operator"
 
