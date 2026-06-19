@@ -577,7 +577,7 @@
       (doseq [{:keys [sql pg pdb] :as mop} sql]
         (print (gen.tc/mangle-table-str id sql))
         (println ";")
-        (if (equiv-mop? mop)
+        (if (= pdb pg)
           (println (indented-pprint-str "  " pdb))
           (do ; Oh, they're different
               (println "  ParticleDB:")
