@@ -16,3 +16,4 @@ pom.xml.asc
 /hegel-core.log
 *.swo
 *.swp
+/repro.sql
