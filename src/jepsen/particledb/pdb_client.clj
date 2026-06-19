@@ -42,6 +42,9 @@
         #"PDB JDBC: null"
         {:type :pdb-jdbc-null, :msg m}
 
+        #"column not found"
+        {:type :column-not-found, :msg m, :definite? true}
+
         #"connection closed"
         {:type :connection-closed}
 
