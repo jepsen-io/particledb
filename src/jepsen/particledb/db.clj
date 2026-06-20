@@ -160,7 +160,10 @@
          (when-let [m (:txn-mode test)]      [:--txn-mode      (name m)])
          (when-let [l (:row-store-memory-limit test)]
            [:--row-store-memory-limit l
-            :--enable-cold-storage])
+            ; This argument mysteriously disappeared in 1.1.18.11.rc-9 (the
+            ; second build of rc-9; the first had it)
+            ;:--enable-cold-storage
+            ])
          ; Since we're trying to use the "partition-pinned" zerocopy-occ, we
          ; probably need to have... some OLTP partitions? The default is to
          ; have none, so let's turn that up.
