@@ -38,5 +38,8 @@
              "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
              ; Our test.check generators need a LOT of stack
              "-Xss16m"
+             ; Temporary: I need a stacktrace for these weird
+             ; classcastexceptions
+             "-XX:-OmitStackTraceInFastThrow"
              ]
   :profiles {:uberjar {:aot :all}})
