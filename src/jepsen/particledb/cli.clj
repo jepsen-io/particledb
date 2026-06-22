@@ -299,6 +299,12 @@
       :parse-fn parse-comma-kws
       :validate [(partial every? db-node-targets) (cli/one-of db-node-targets)]]
 
+     [nil "--compare-gens GENERATORS" "A comma-separated list of generators to use for compare test cases. Choices are `jepsen.sql` (simpler) or `particledb` (more complex)."
+      :default [:jepsen.sql :particledb]
+      :parse-fn parse-comma-kws
+      :validate [(partial every? #{:jepsen.sql :particledb})
+                 "Choices are jepsen.sql, particledb"]]
+
      [nil "--compare-origin PATTERN" "Takes a pattern matching origin strings in the compare workload, like 'different (data|columns)'. Hunts for that kind of bug and ignores all others, except those of unknown origin."
       :parse-fn re-pattern
       :default #""]

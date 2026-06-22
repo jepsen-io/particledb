@@ -12,7 +12,9 @@
             [com.gfredericks.test.chuck.generators :as g']
             [dom-top.core :refer [loopr]]
             [jepsen [random :as rand]
-                    [util :as util]]))
+                    [util :as util]]
+            [jepsen.sql [ast :as ast]
+                        [gen :as jsg]]))
 
 ;; Repl ideas
 #_(do
@@ -913,6 +915,75 @@
                 (balance-txns statements))
      :teardown-sql (schema->teardown-sql schema)}))
 
+;; We can also use jepsen.sql's case generator, which is much simpler--the hope
+;; is that simpler histories let us find bad bugs quickly without getting
+;; bogged down in (e.g.) the particulars of floating-point arithmetic.
+
+(defprotocol Inline
+  (inline [x]
+          "Converts a Clojure value to an SQL string."))
+
+(extend-protocol Inline
+  nil     (inline [_] "NULL")
+  Long    (inline [x] (str x))
+  Double  (inline [x]
+            (cond (infinite? x)
+                  (str "'" x "'")
+
+                  (NaN? x)
+                  "'NaN'"
+
+                  true
+                  (str x)))
+  Boolean (inline [x] (when x "TRUE" "FALSE"))
+  String  (inline [x] (str "'" (str/replace x "'" "''") "'")))
+
+(defn inline-statement
+  "Takes a next.jdbc vector for `execute!`, like [\"SELECT * FROM foo WHERE id
+   = ?\" 2], and inlines the parameters, returning a string."
+  [[string & params]]
+  (reduce (fn [string param]
+            (str/replace-first string "?" (inline param)))
+          string
+          params))
+
+(defn inline-sqls
+  "Takes a collection of jepsen.sql.ast/SQLs and converts it to a vector of
+  string statements."
+  [sqls]
+  (mapv (comp inline-statement ast/sql)
+        sqls))
+
+(defn gen-jepsen-sql-case
+  "Like gen-case, but uses the jepsen.sql ast generator instead. Luckily (hi)
+  the two take the same options maps."
+  [opts]
+  (flet [case (jsg/gen-case opts)]
+        (let [; The AST was designed to have rewritable table names, but our
+              ; system here does it with string munging, so let's rewrite the
+              ; tables with the special marker characters.
+              case       (ast/rewrite-tables
+                           case (fn [s] (str table-start s table-end)))
+              schema     (:schema case)
+              setup      (inline-sqls (ast/setup schema))
+              teardown   (inline-sqls (ast/teardown schema))
+              statements (inline-sqls (:statements case))]
+          (info "sql" (into setup (balance-txns statements)))
+          {:schema :do-you-really-need-this?
+           :sql    (into setup
+                         (balance-txns statements))
+           :teardown-sql teardown})))
+
+(defn gen-case+
+  "A generator of cases. Dispatches to one or (or either) our gen-case or
+  gen-jepsen.sql-case based on (:generators opts)."
+  [opts]
+  (info :gen-case opts)
+  (g/let [gen-kw (g/elements (:generators opts))]
+    (case gen-kw
+      :jepsen.sql  (gen-jepsen-sql-case opts)
+      :particledb  (gen-case opts))))
+
 ;; Custom shrinking
 
 (defn deletev
@@ -1071,7 +1142,10 @@
 
       :max-statement-count  The maximum number of statements
       :max-table-count  The maximum number of tables
-      :max-column-count The maximum number of columns"
+      :max-column-count The maximum number of columns
+      :generators           A vector of keywords. :jepsen.sql uses the
+                            jepsen.sql.gen generator; :particledb uses the
+                            one here."
   [opts last-id queue]
   ; We are *very* bad at shrinking schemas (for the usual test.check
   ; bind reasons), so we build a loop that gradually expands the
@@ -1083,8 +1157,9 @@
           max-table-count "tables and"
           max-column-count "columns")
     (let [checked (qc! opts
-                       (gen-case
-                         (assoc (select-keys opts [:max-statement-count])
+                       (gen-case+
+                         (assoc (select-keys opts [:max-statement-count
+                                                   :generators])
                                 :max-table-count max-table-count
                                 :max-column-count max-column-count))
                        queue
@@ -1129,7 +1204,10 @@
       :seed           The random seed
       :max-statement-count  The maximum number of statements
       :max-table-count  The maximum number of tables
-      :max-column-count The maximum number of columns"
+      :max-column-count The maximum number of columns
+      :generators           A vector of keywords. :jepsen.sql uses the
+                            jepsen.sql.gen generator; :particledb uses the
+                            one here."
   [{:keys [pool target-origin] :as opts} last-id queue]
   ; Check whether anyone else is looking for this
   (let [[pool0] (swap-vals! pool (fn [pool]
@@ -1163,6 +1241,7 @@
     (swap! pool assoc worker-id :running)
     (future
       (util/with-thread-name "jepsen test.check"
+        (info "Jepsen test.check worker starting")
         (try
           (let [checked (worker-pass-1! opts last-id queue)]
             (when-let [smallest (first (:smallest (:shrunk checked)))]
@@ -1188,6 +1267,9 @@
       :max-statement-count  The maximum number of statements
       :max-table-count  The maximum number of tables
       :max-column-count The maximum number of columns
+      :generators           A vector of keywords. :jepsen.sql uses the
+                            jepsen.sql.gen generator; :particledb uses the
+                            one here.
 
   Workers will spawn a series of origin workers to chase down each unique
   origin they find."
@@ -1195,6 +1277,7 @@
     :or   {concurrency 1}
     :as   opts}
    last-id queue]
+  (info "worker")
   (let [; This is a map of origin strings to origin worker states: initially
         ; :running, and :done when complete.
         pool (atom {})

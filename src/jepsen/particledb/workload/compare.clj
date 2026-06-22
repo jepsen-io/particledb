@@ -301,15 +301,16 @@
                    #"overflow"
                    "overflow"
 
-                   "unknown postgres error"
-
                    ; ParticleDB doesn't do NOT NULL
                    #"violates not-null constraint"
                    "not-null constraint"
 
                    ; Or duplicate constraints
                    #"violates unique constraint"
-                   "unique constraint")
+                   "unique constraint"
+
+                   "unknown postgres error")
+
 
                  ; PDB threw an error
                  (and (map? pdb) (:msg pdb))
@@ -638,6 +639,7 @@
   (let [last-id (atom -1)
         queue   (atom PersistentQueue/EMPTY)
         tc-worker (gen.tc/worker {:test-cases 10000
+                                  :generators  (:compare-gens opts)
                                   :concurrency (:concurrency opts)
                                   :seed (rand/long)
                                   :max-statement-count
