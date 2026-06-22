@@ -358,6 +358,9 @@
                    #"non-nullable but contains null values"
                    "non-nullable contains null"
 
+                   #"operator does not exist"
+                   "operator does not exist"
+
                    #"out of range"
                    "out of range"
 
