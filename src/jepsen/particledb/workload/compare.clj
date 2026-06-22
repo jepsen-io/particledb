@@ -331,7 +331,6 @@
                    ; 1.2, and Infinity) are considered duplicates for a unique
                    ; constraint? This is hilarious given ParticleDB seems
                    ; totally incapable of doing uniqueness on integers.
-                   ; TODO: write this up
                    #"duplicate key value"
                    "duplicate key value"
 
@@ -380,11 +379,9 @@
 
                  ; We got results, but... they differed
                  (and (vector? pg) (vector? pdb))
-                 (cond ; TODO: write this up
-                       (not= (count pg) (count pdb))
+                 (cond (not= (count pg) (count pdb))
                        "different number of rows"
 
-                       ; TODO: write this up
                        (not= (reduce set/union #{} (map (comp set keys) pg))
                              (reduce set/union #{} (map (comp set keys) pdb)))
                        "different columns"
