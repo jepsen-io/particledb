@@ -120,11 +120,11 @@
 
   db/Pause
   (pause! [_ test node]
-    (c/su (cu/kill-bin! :STOP bin))
+    (c/su (cu/kill-bin! :STOP false bin))
     :paused)
 
   (resume! [_ test node]
-    (c/su (cu/kill-bin! :CONT bin))
+    (c/su (cu/kill-bin! :CONT false bin))
     :resumed)
 
   db/Kill
