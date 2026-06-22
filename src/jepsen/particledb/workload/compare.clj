@@ -223,7 +223,7 @@
       ; ParticleDB returns an abort error. Not sure why, but let's let that
       ; slide for now.
       (and (map? pdb)
-           (= :txn-aborted (:type pdb))
+           (= :aborted (:type pdb))
            (= [{:next.jdbc/update-count 0}] pg))
 
       ; Actual data
