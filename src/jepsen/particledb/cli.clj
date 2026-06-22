@@ -95,7 +95,8 @@
    :compare
    :internal-pg
    :internal-pdb
-   :internal-psql
+   :internal-sim-pg
+   :internal-sim-pdb
    :rw-pg
    :rw-pdb])
 
