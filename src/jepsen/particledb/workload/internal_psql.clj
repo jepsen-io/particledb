@@ -89,19 +89,23 @@
 (defn sql!
   "Runs an SQL string and returns results."
   [test sql]
-  (let [stream (slow-stream test sql)
-        res (-> {:cmd (->> ["psql" "-h" "localhost" "-p" (:postgres-port test)]
-                           (map c/escape)
-                           (str/join " "))
-                 :in stream}
-                c/wrap-cd
-                c/wrap-sudo
-                c/wrap-trace
-                c/ssh*
-                cc/throw-on-nonzero-exit
-                c/just-stdout)]
-    (assert (= 0 (.available stream)))
-    res))
+  (try+
+    (let [stream (slow-stream test sql)
+          res (-> {:cmd (->> ["psql" "-h" "localhost" "-p" (:postgres-port test)]
+                             (map c/escape)
+                             (str/join " "))
+                   :in stream}
+                  c/wrap-cd
+                  c/wrap-sudo
+                  c/wrap-trace
+                  c/ssh*
+                  cc/throw-on-nonzero-exit
+                  c/just-stdout)]
+      (assert (= 0 (.available stream)))
+      res)
+    (catch [:type :jepsen.control/nonzero-exit] e
+      ; We can't serialize the inputstream that gets thrown here
+      (throw+ (dissoc e :in)))))
 
 (defn mop->sql
   "Turns a micro-op into an SQL statement."
