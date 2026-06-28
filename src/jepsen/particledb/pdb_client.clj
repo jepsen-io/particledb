@@ -69,6 +69,9 @@
         #"table not found"
         {:type :table-not-found, :msg m, :definite? true}
 
+        #"violates not-null constraint"
+        {:type :violates-not-null, :msg m, :definite? true}
+
         nil)
 
       ExceptionInfo
