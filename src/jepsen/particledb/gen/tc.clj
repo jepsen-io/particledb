@@ -935,7 +935,7 @@
 
                   true
                   (str x)))
-  Boolean (inline [x] (when x "TRUE" "FALSE"))
+  Boolean (inline [x] (if x "TRUE" "FALSE"))
   String  (inline [x] (str "'" (str/replace x "'" "''") "'")))
 
 (defn inline-statement
