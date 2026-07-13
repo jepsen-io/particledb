@@ -71,7 +71,8 @@
           ; anomalies that's at least worth discussing.
           :serializable-ssi :strong-serializable
           ; The internal docs explicitly claim "Strict Serializable".
-          :table-2pl        :strong-serializable)))
+          :table-2pl           :strong-serializable
+          :strict-serializable :strong-serializable)))
 
 (def workloads
   "A map of workload names to functions that take CLI options and return
