@@ -35,7 +35,7 @@
 
 (def txn-modes
   "The set of txn modes supported by ParticleDB"
-  #{:fast :occ-v3 :zero-copy-occ, :serializable-ssi, :table-2pl})
+  #{:fast :occ-v3 :zero-copy-occ, :serializable-ssi, :table-2pl, :strict-serializable})
 
 (defn expected-consistency-model
   "What consistency level do we expect for a given transaction mode and wal
