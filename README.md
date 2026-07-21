@@ -87,9 +87,15 @@ two flavors based on the client protocol it uses, e.g. `append-pg` and
 
 - `wr`: Transactions which write unique integers and read them.
 
-- `internal`: Transactions which perform inserts, updates, and reads, and
-  validate that within a transaction, one observes values consistent with
-  previous reads and writes.
+- `internal`: Transactions which perform inserts, updates, and reads over a
+  simple key-value table, and validate that within a transaction, one observes
+values consistent with previous reads and writes.
+
+- `internal-sim`: A more general workload for internal consistency. Generates
+  random schemas and transactions over those schemas, then searches for
+violations of internal consistency. Unlike the `internal` workload, which
+operates purely on keys and values, this version is aware of predicates and
+negative information.
 
 These workloads set up ParticleDB and Postgres alongside one another, and compare the two.
 
