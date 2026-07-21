@@ -95,8 +95,8 @@
    :compare
    :internal-pg
    :internal-pdb
-   ;:internal-sim-pg
-   ;:internal-sim-pdb
+   :internal-sim-pg
+   :internal-sim-pdb
    :rw-pg
    :rw-pdb])
 
