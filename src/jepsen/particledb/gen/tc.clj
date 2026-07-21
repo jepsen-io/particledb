@@ -969,7 +969,7 @@
               teardown   (inline-sqls (ast/teardown schema))
               statements (inline-sqls (:statements case))]
           (info "sql" (into setup (balance-txns statements)))
-          {:schema :do-you-really-need-this?
+          {:schema :intentionally-left-blank
            :sql    (into setup
                          (balance-txns statements))
            :teardown-sql teardown})))
