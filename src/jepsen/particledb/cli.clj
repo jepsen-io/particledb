@@ -72,6 +72,7 @@
           :serializable-ssi :strong-serializable
           ; The internal docs explicitly claim "Strict Serializable".
           :table-2pl           :strong-serializable
+          ; Presumably "strict serializable" also means strict serializable.
           :strict-serializable :strong-serializable)))
 
 (def workloads
