@@ -110,12 +110,14 @@
     :packet
     :clock
     :bitflip-file-chunks
+    :copy-file-chunks
     :snapshot-file-chunks
     :truncate-file})
 
 (def file-corruption-nemeses
   "Which nemeses corrupt files?"
   #{:bitflip-file-chunks
+    :copy-file-chunks
     :snapshot-file-chunks
     :truncate-file})
 
@@ -137,10 +139,11 @@
    [:clock]
    [:packet]
    [:bitflip-file-chunks  :kill]
+   [:copy-file-chunks :kill]
    [:snapshot-file-chunks :kill]
    [:truncate-file        :kill]
    ; General chaos
-   [:partition :pause :kill :clock :bitflip-file-chunks
+   [:partition :pause :kill :clock :bitflip-file-chunks :copy-file-chunks
     :snapshot-file-chunks :truncate-file-chunks]
    ])
 

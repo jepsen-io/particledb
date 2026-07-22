@@ -69,7 +69,10 @@
 (def file-types
   "A map of file types (e.g. :blk) to regexes that identify them."
   ; TODO: figure out what data files ParticleDB uses, create types
-  {:all #""})
+  {:lock       #"LOCK$"
+   :manifest   #"MANIFEST$"
+   :seg-floor  #"seg_floor$"
+   :wal        #"\.wal$"})
 
 (defn rand-data-file
   "Picks a random NATS data file on the given node. Uses `(:corrupt-file-type
@@ -77,15 +80,16 @@
   [test node]
   (c/with-node test node
              (c/su
-               (->> (cu/ls db/data-dir
-                           {:recursive? true
-                            :full-path? true
-                            :types [:file]})
-                    (filter (if-let [t (:corrupt-file-type test)]
-                              (partial re-find (file-types t))
-                              (constantly true)))
-                    vec
-                    rand/nth-empty))))
+               (let [files (cu/ls db/data-dir
+                                  {:recursive? true
+                                   :full-path? true
+                                   :types [:file]})
+                     _ (info :files files)
+                     files (if-let [t (:corrupt-file-type test)]
+                             (filter (partial re-find (file-types t))
+                                     files)
+                             files)]
+                 (rand/nth-empty (vec files))))))
 
 (defn corrupt-file-expand-corruption
   "Fills in the parameters for a single file corruption operation's corruption"
@@ -94,7 +98,8 @@
   (when-let [file (rand-data-file test node)]
     (when-let [size (try+ (-> (c/with-node test node
                                         (c/exec :stat "-c" "%s" file))
-                             parse-long)
+                             parse-long
+                             (max 1))
                           (catch [:type :jepsen.control/nonzero-exit] _))]
       (let [corruption (assoc corruption :file file)]
         (case f
@@ -103,6 +108,10 @@
                  :probability
                  ; Roughly two errors per file
                  (/ 2 8 size))
+
+          :copy-file-chunks
+          (assoc corruption
+                 :probability 0.1)
 
           :snapshot-file-chunks
           (assoc corruption :probability 0.5)
@@ -127,6 +136,7 @@
         ; What faults can we perform?
         faults (set/intersection faults
                                  #{:bitflip-file-chunks
+                                   :copy-file-chunks
                                    :snapshot-file-chunks
                                    :truncate-file})
         needed? (seq faults)
@@ -134,6 +144,9 @@
         gen (gen/mix
               (mapv {:bitflip-file-chunks
                      (gen/repeat {:type :info, :f :bitflip-file-chunks})
+
+                     :copy-file-chunks
+                     (gen/repeat {:type :info, :f :copy-file-chunks})
 
                      :snapshot-file-chunks
                      (gen/flip-flop
@@ -144,8 +157,10 @@
                      (gen/repeat {:type :info, :f :truncate-file})}
                     faults))
         ; Target a minority of nodes
-        gen (nf/nodes-gen (comp util/minority count :nodes) gen)
-        ;gen (nf/nodes-gen (constantly 1) gen)
+        ;gen (nf/nodes-gen (comp util/minority count :nodes) gen)
+        ; Target a single node; we're testing an un-clustered system, so no
+        ; point in minority
+        gen (nf/nodes-gen (constantly 1) gen)
         ; Expand values into specific files, probabilities, etc
         gen (gen/map corrupt-file-expand-value gen)
         ; And slow down
@@ -153,7 +168,7 @@
     {:nemesis (nf/corrupt-file-nemesis
                 ; 4K chunks by default, I guess?
                 {:chunk-size (* 1024 4)})
-     :generator (when needed? gen)
+     :generator (when needed? (gen/cache 1 gen))
      :perf #{{:name "corrupt-file"
               :fs #{:bitflip-file-chunks
                     :copy-file-chunks
