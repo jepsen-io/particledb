@@ -87,6 +87,26 @@
   [test node]
   (.indexOf ^java.util.List (:nodes test) node))
 
+(defn parse-version
+  "This is a hot mess; we're testing something
+  that doesn't really have publicly available versions, so we use paths which
+  should hopefully have something vaguely 1.2.3 shaped in them.
+
+  Takes a string like foo/bar/foo-1.2.3 and returns a vector [1 2 3]"
+  [s]
+  (if-let [[_ filename] (re-find #"([^/]+)$" s)]
+    (->> (str/split filename #"\.")
+         (mapv (fn [part]
+                (parse-long (re-find #"\d+" part)))))
+    (throw+ {:type :unexpected-version-string
+             :expected "A string with a version number in it, like foo/bar/baz-1.2.3"
+             :actual s})))
+
+(defn version<=
+  "Compares two version strings."
+  [a b]
+  (not (pos? (compare (parse-version a) (parse-version b)))))
+
 (defrecord DB [lazyfs]
   db/DB
   (setup! [this test node]
@@ -95,8 +115,10 @@
       (db/setup! lazyfs test node))
 
     (db/start! this test node)
-    (cu/await-tcp-port (:particledb-port test)
-                       {:log-interval 10000})
+    (when (version<= "1.1.0" (:version test))
+      ; This interface wasn't part of 1.0.0
+      (cu/await-tcp-port (:particledb-port test)
+                         {:log-interval 10000}))
     (cu/await-tcp-port (:postgres-port test)
                        {:log-interval 10000}))
 
@@ -156,18 +178,20 @@
          ; connections closing. Alas... I don't think this option does anything.
          :--connection-timeout 10000
          :--max-connections 16384
-         (when-let [m (:wal-sync-mode test)] [:--wal-sync-mode (name m)])
-         (when-let [m (:txn-mode test)]      [:--txn-mode      (name m)])
+         (when (version<= "1.1.0" (:version test))
+           ; These options were added after 1.0.0
+           [(when-let [m (:wal-sync-mode test)] [:--wal-sync-mode (name m)])
+            (when-let [m (:txn-mode test)]      [:--txn-mode      (name m)])
+            ; Since we're trying to use the "partition-pinned" zerocopy-occ, we
+            ; probably need to have... some OLTP partitions? The default is to
+            ; have none, so let's turn that up.
+            :--oltp-partitions 5])
          (when-let [l (:row-store-memory-limit test)]
            [:--row-store-memory-limit l
             ; This argument mysteriously disappeared in 1.1.18.11.rc-9 (the
             ; second build of rc-9; the first had it)
             ;:--enable-cold-storage
             ])
-         ; Since we're trying to use the "partition-pinned" zerocopy-occ, we
-         ; probably need to have... some OLTP partitions? The default is to
-         ; have none, so let's turn that up.
-         :--oltp-partitions 5
          ; Clustering options
          (when (cluster? test)
            [; This is baffling. The internal operator guide says
