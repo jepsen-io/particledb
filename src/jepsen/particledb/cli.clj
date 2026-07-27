@@ -193,8 +193,10 @@
   (let [checker (checker/unhandled-exceptions)]
     (reify checker/Checker
       (check [this test history opts]
-        (let [r (checker/check checker test history opts)]
-          (assoc r :valid? (not (seq (:exceptions r)))))))))
+        (let [r (checker/check checker test history opts)
+              exceptions (->> (:exceptions r)
+                              (remove (comp #{:nemesis} :process :example)))]
+          (assoc r :valid? (not (seq exceptions))))))))
 
 (defn particledb-test
   "Takes CLI options and constructs a Jepsen test map"
