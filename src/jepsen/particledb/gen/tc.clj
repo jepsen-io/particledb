@@ -978,7 +978,6 @@
   "A generator of cases. Dispatches to one or (or either) our gen-case or
   gen-jepsen.sql-case based on (:generators opts)."
   [opts]
-  (info :gen-case opts)
   (g/let [gen-kw (g/elements (:generators opts))]
     (case gen-kw
       :jepsen.sql  (gen-jepsen-sql-case opts)
