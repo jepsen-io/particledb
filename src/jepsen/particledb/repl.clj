@@ -96,7 +96,6 @@
           ; Play forward all statements on each client, one client at a time
           results (->> clients
                        (mapv (fn [[client-name client]]
-                               (prn client-name client)
                                [client-name
                                 (mapv (partial repro/mop! client) statements)]))
                        (into {}))
