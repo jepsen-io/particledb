@@ -24,7 +24,9 @@
 (defn open-pdb-pg
   "Opens a postgres client to the given ParticleDB node."
   [node]
-  (pgc/open {:postgres-port 15432}, "n9"))
+  (pgc/open {:postgres-port     15432
+             :prepare-threshold Integer/MAX_VALUE}
+            node))
 
 (defn open-pg
   "Opens a postgres client to the given Postgres node."
@@ -32,7 +34,7 @@
   (pgc/open {:postgres-user "postgres"
              :postgres-password "pw"
              :postgres-port 5432}
-            "n9"))
+            node))
 
 (defn open2!
   "Opens and defs two clients: pgc, pdb-pdbc, and also a map `clients` for use
