@@ -33,9 +33,12 @@
   "The set of WAL sync modes supported by ParticleDB"
   #{:sync :groupsync :nosync})
 
-(def txn-modes
-  "The set of txn modes supported by ParticleDB"
-  #{:fast :occ-v3 :zero-copy-occ, :serializable-ssi, :table-2pl, :strict-serializable})
+(defn txn-modes
+  "The set of txn modes supported by ParticleDB for a given version."
+  [version]
+  (if (db/version<= "1.1.18.11.rc-22" version)
+    #{:occ :serializable}
+    #{:fast :occ-v3 :zero-copy-occ, :serializable-ssi, :table-2pl, :strict-serializable}))
 
 (defn expected-consistency-model
   "What consistency level do we expect for a given transaction mode and wal
@@ -62,9 +65,12 @@
         (case txn-mode
           ; They explicitly say SI, but I'm willing to bet it's actually strong
           ; SI.
+          :occ            :strong-snapshot-isolation
           :occ-v3         :strong-snapshot-isolation
           ; Ditto
           :zero-copy-occ  :strong-snapshot-isolation
+          ; particledb start --help is explicit about this
+          :serializable   :strong-serializable
           ; The internal docs say "not classified", which is silly;
           ; serializable is *right there* in the name. In PG this is actually
           ; strong-1SR, so let's try that here; if we do find realtime/process
@@ -421,8 +427,7 @@
       :validate [pos? "Must be positive"]]
 
      [nil "--txn-mode MODE" "The ParticleDB transaction mode."
-      :parse-fn keyword
-      :validate [txn-modes (cli/one-of txn-modes)]]
+      :parse-fn keyword]
 
      ["-v" "--version VERSION" "What version should we test? Can either be a version string like '1.1.4' or a path to a local binary on the control node."
       :default "1.1.4"]
@@ -448,7 +453,7 @@
                       [l]))
         txn-modes (if-let [t (:txn-mode opts)]
                     [t]
-                    (->> txn-modes
+                    (->> (txn-modes (:version opts))
                          ; We sort of expect fast to be a tire fire; I'm not
                          ; even sure how to go about testing it.
                          (remove #{:fast})
