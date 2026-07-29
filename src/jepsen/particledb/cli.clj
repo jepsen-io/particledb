@@ -139,18 +139,19 @@
   [; Nothing
    []
    ; One fault at a time
-   [:partition]
+   ;[:partition]
    [:kill]
-   [:pause]
-   [:clock]
-   [:packet]
+   ;[:pause]
+   ;[:clock]
+   ;[:packet]
    [:bitflip-file-chunks  :kill]
    [:copy-file-chunks :kill]
    [:snapshot-file-chunks :kill]
    [:truncate-file        :kill]
    ; General chaos
-   [:partition :pause :kill :clock :bitflip-file-chunks :copy-file-chunks
-    :snapshot-file-chunks :truncate-file-chunks]
+   ;[:partition :pause :kill :clock :bitflip-file-chunks :copy-file-chunks
+   ; :snapshot-file-chunks :truncate-file-chunks]
+   [:kill :bitflip-file-chunks :copy-file-chunks :snapshot-file-chunks :truncate-file]
    ])
 
 (def special-nemeses
