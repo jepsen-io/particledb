@@ -63,12 +63,11 @@
         ; OK, we're running in one of the two safe sync modes
         true
         (case txn-mode
-          ; They explicitly say SI, but I'm willing to bet it's actually strong
-          ; SI.
-          :occ            :strong-snapshot-isolation
-          :occ-v3         :strong-snapshot-isolation
-          ; Ditto
-          :zero-copy-occ  :strong-snapshot-isolation
+          ; They explicitly say SI. Note that Postgres appears to be
+          ; strong-snapshot-isolation at its RR (SI) level.
+          :occ            :snapshot-isolation
+          :occ-v3         :snapshot-isolation
+          :zero-copy-occ  :snapshot-isolation
           ; particledb start --help is explicit about this
           :serializable   :strong-serializable
           ; The internal docs say "not classified", which is silly;
@@ -78,7 +77,7 @@
           :serializable-ssi :strong-serializable
           ; The internal docs explicitly claim "Strict Serializable".
           :table-2pl           :strong-serializable
-          ; Presumably "strict serializable" also means strict serializable.
+          ; Presumably `strict-serializable` also means Strict Serializable.
           :strict-serializable :strong-serializable)))
 
 (def workloads
@@ -263,7 +262,7 @@
         gen (if-let [wrap (:wrap-generator workload)]
               (wrap gen)
               gen)
-        ; The compare test bypasses all that; no faults, we just let hegel
+        ; The compare test bypasses all that. No faults, we just let test.check
         ; drive.
         gen (if (#{:compare} workload-name)
               workload-gen
