@@ -126,9 +126,15 @@ if ParticleDB and Postgres diverged, the results for each respectively. There
 also follows a condensed version which can be copy-pasted into e.g. a `psql` shell
 to reproduce the problem interactively.
 
-## Possible Issues
+## Known Issues
 
 There's a bug in the `internal-sim` workload which occasionally asks for tables with multiple primary keys. This is harmless, but the checker will call it a test failure. Mea culpa!
+
+The `gen.tc` generator is supposed to only produce `ORDER BY` clauses which
+induce a total order on the resulting table; `compare` relies on this fact when
+it decides whether to care about the order of rows. There's a bug in the
+generator that causes us to construct partial orders; these manifest as false
+failures in `compare`.
 
 The `compare` workload continues to show *very* strange anomalies, often early
 in the test history, where transactions observe nonsense or seem to conflict
