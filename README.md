@@ -10,12 +10,12 @@ environment](https://github.com/jepsen-io/jepsen?tab=readme-ov-file#setting-up-a
 first. Then you can run, in this directory:
 
 ```
-lein run test --nodes n1 -w internal-pdb --time-limit 10 --concurrency 2 --version builds/pdb-1.1.17
+lein run test --nodes n1 -w internal-pdb --time-limit 10 --concurrency 2 --version builds/1.1.17
 ```
 
 Which will install ParticleDB on node `n1`, and run a test of internal
 transaction consistency for ten seconds, with two clients, using the ParticleDB
-binary `builds/pdb-1.1.17`. It looks like ParticleDB's versioned downloads are
+binary `builds/1.1.17`. It looks like ParticleDB's versioned downloads are
 now inaccessible, so `--version 1.1.14` won't work for the time being.
 
 You can also build a fat jar with `lein uberjar`, and run it with `./test.sh
@@ -31,7 +31,7 @@ instructions](https://github.com/jepsen-io/jepsen#aws).
 
 For the last few weeks the ParticleDB version-specific downloads have been
 unavailable, so you'll need to ensure you have a ParticleDB x68_64 binary in
-this test harness directory. I name mine after the versions, like
+this test harness directory. They should be named after the versions, like
 `jepsen.particledb/builds/1.1.4`. Once you have a binary, copy the test harness
 directory from your local machine to the EC2 node like so:
 
@@ -131,10 +131,10 @@ to reproduce the problem interactively.
 There's a silly hack here for playing around with ParticleDB. You can run:
 
 ```clj
-lein run repro-watch n2 repro.sql
+lein run repro-watch n9 repro.sql
 ```
 
-This will connect to ParticleDB and Postgres on `n2`, assuming the same sort of
+This will connect to ParticleDB and Postgres on `n9`, assuming the same sort of
 setup that the test uses. It'll watch for changes in `repro.sql`, which
 contains SQL statements, one per line. It submits those SQL statements
 sequentially to both databases and for ParticleDB, using both the Postgres and
@@ -183,7 +183,7 @@ SELECT * FROM t;
 
 ## License
 
-Copyright © 2026 Jepsen, LLC
+Copyright © Jepsen, LLC
 
 This program and the accompanying materials are made available under the
 terms of the Eclipse Public License 2.0 which is available at
