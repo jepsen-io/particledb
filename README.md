@@ -126,6 +126,18 @@ if ParticleDB and Postgres diverged, the results for each respectively. There
 also follows a condensed version which can be copy-pasted into e.g. a `psql` shell
 to reproduce the problem interactively.
 
+## Possible Issues
+
+There's a bug in the `internal-sim` workload which occasionally asks for tables with multiple primary keys. This is harmless, but the checker will call it a test failure. Mea culpa!
+
+The `compare` workload continues to show *very* strange anomalies, often early
+in the test history, where transactions observe nonsense or seem to conflict
+with themselves. I feel like (given what we've seen with ParticleDB so far)
+these are *likely* ParticleDB bugs, but it might also be a bug in the compare
+workload itself. I've made two passes at this trying to rule out any potential
+concurrent access to a table, and so far haven't found anything, but it might
+be worth digging in to later.
+
 ## Interactive Reproducer
 
 There's a silly hack here for playing around with ParticleDB. You can run:
