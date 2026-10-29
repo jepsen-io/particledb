@@ -182,7 +182,6 @@
          (when (version<= "1.1.0" (:version test))
            ; These options were added after 1.0.0
            [(when-let [m (:wal-sync-mode test)] [:--wal-sync-mode (name m)])
-            (when-let [m (:txn-mode test)]      [:--txn-mode      (name m)])
             ; Since we're trying to use the "partition-pinned" zerocopy-occ, we
             ; probably need to have... some OLTP partitions? The default is to
             ; have none, so let's turn that up.

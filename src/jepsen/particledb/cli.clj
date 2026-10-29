@@ -33,23 +33,17 @@
   "The set of WAL sync modes supported by ParticleDB"
   #{:sync :groupsync :nosync})
 
-(defn txn-modes
-  "The set of txn modes supported by ParticleDB for a given version."
-  [version]
-  (if (db/version<= "1.1.18.11.rc-22" version)
-    #{:occ :serializable}
-    #{:fast :occ-v3 :zero-copy-occ, :serializable-ssi, :table-2pl, :strict-serializable}))
-
 (defn expected-consistency-model
   "What consistency level do we expect for a given transaction mode and wal
   sync mode?"
   ; I *think* these are the defaults, but the docs contradict themselves so ???
-  [{:keys [txn-mode wal-sync-mode]
-    :or {txn-mode :occ-v3, wal-sync-mode :groupsync}}]
-  (cond ; In fast txn mode, they start listing allowed anomalies at P4 and A5A,
-        ; and also say that "no dirty reads", so I think we should be at...
+  [{:keys [isolation concurrency-control wal-sync-mode]
+    :or {wal-sync-mode :groupsync}}]
+  (cond ; I think this is what used to be --txn-mode fast, and in the operator
+        ; guide, they started listing allowed anomalies at P4 and A5A,
+        ; and also said "no dirty reads", so I think we should be at...
         ; read committed? Maybe MAV? SI is out, not sure about causal.
-        (= txn-mode :fast)
+        (= concurrency-control :none)
         :monotonic-atomic-view
 
         ; Having ruled out `fast`, we're supposed to be at *least* SI. But if
@@ -62,23 +56,19 @@
 
         ; OK, we're running in one of the two safe sync modes
         true
-        (case txn-mode
-          ; They explicitly say SI. Note that Postgres appears to be
-          ; strong-snapshot-isolation at its RR (SI) level.
-          :occ            :snapshot-isolation
-          :occ-v3         :snapshot-isolation
-          :zero-copy-occ  :snapshot-isolation
-          ; particledb start --help is explicit about this
-          :serializable   :strong-serializable
-          ; The internal docs say "not classified", which is silly;
-          ; serializable is *right there* in the name. In PG this is actually
-          ; strong-1SR, so let's try that here; if we do find realtime/process
-          ; anomalies that's at least worth discussing.
-          :serializable-ssi :strong-serializable
-          ; The internal docs explicitly claim "Strict Serializable".
-          :table-2pl           :strong-serializable
-          ; Presumably `strict-serializable` also means Strict Serializable.
-          :strict-serializable :strong-serializable)))
+        ; So --txn-mode is now... undocumented, possibly removed. The binary
+        ; still accepts it, but it doesn't show up in the help or online docs.
+        ; There's now --concurrency-control, which has two completely different
+        ; descriptions depending on which docs you believe. The web site says
+        ; it chooses between regular Serializable and Strong Serializable. The
+        ; binary's --help says it sets the default SQL isolation level:
+        ; read-committed, serializable, etc. But halfway through the sentence,
+        ; the LLM (I hope?) which generated it seems to forget what it was
+        ; talking about, and starts talking about --concurrency-control none or
+        ; strict-optimistic, which are... not SQL isolation levels? I am so, SO
+        ; confused. Let's just... try strong-serializable for now and see what
+        ; happens.
+        :strong-serializable))
 
 (def workloads
   "A map of workload names to functions that take CLI options and return
@@ -181,8 +171,6 @@
        (name (:workload opts))
        (when-let [m (:wal-sync-mode opts)]
          (str " wal=" (name m)))
-       (when-let [m (:txn-mode opts)]
-         (str " txn=" (name m)))
        (when (:lazyfs opts)
          " lazyfs")
        (when-let [cft (:corrupt-file-type opts)]
@@ -341,7 +329,7 @@
         :parse-fn parse-comma-kws
         :validate [(partial every? encodings) (cli/one-of encodings)]])
 
-     [nil "--expected-consistency-model MODEL" "What level of isolation do we *expect* to observe? Defaults are chosen based on wal-sync-mode and txn-mode."
+     [nil "--expected-consistency-model MODEL" "What level of isolation do we *expect* to observe? Defaults are chosen based on wal-sync-mode."
       :parse-fn keyword]
 
      [nil "--final-time-limit SECONDS" "How long should we run the final generator for, at most? In seconds."
@@ -428,9 +416,6 @@
       :parse-fn #(Long/parseLong %)
       :validate [pos? "Must be positive"]]
 
-     [nil "--txn-mode MODE" "The ParticleDB transaction mode."
-      :parse-fn keyword]
-
      ["-v" "--version VERSION" "What version should we test? Can either be a version string like '1.1.4' or a path to a local binary on the control node."
       :default "1.1.4"]
 
@@ -453,13 +438,6 @@
                     (if (nil? l)
                       [false true]
                       [l]))
-        txn-modes (if-let [t (:txn-mode opts)]
-                    [t]
-                    (->> (txn-modes (:version opts))
-                         ; We sort of expect fast to be a tire fire; I'm not
-                         ; even sure how to go about testing it.
-                         (remove #{:fast})
-                         (sort)))
         wal-modes (if-let [w (:wal-sync-mode opts)] [w] (sort wal-sync-modes))
         cfts        (let [cft (:corrupt-file-type opts)]
                       (if (nil? cft)
@@ -471,14 +449,12 @@
           ft    (if (seq (set/intersection file-corruption-nemeses (set n)))
                   cfts
                   [nil])
-          t     txn-modes
           wm    wal-modes
           w     workloads]
       (particledb-test (-> opts
                            (assoc :lazyfs             l
                                   :nemesis            n
                                   :corrupt-file-type  ft
-                                  :txn-mode           t
                                   :wal-sync-mode      wm
                                   :workload           w))))))
 (defn opt-fn!
