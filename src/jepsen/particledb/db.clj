@@ -174,6 +174,7 @@
          ;:--pg-password (:postgres-password test)
          ; So let's try turning off auth entirely
          :--no-auth
+         :--no-auth-allow-remote
          ; This makes it deeply frustrating to debug because we constantly have
          ; connections closing. Alas... I don't think this option does anything.
          :--connection-timeout 10000

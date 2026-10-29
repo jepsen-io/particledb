@@ -373,7 +373,9 @@
       :validate [pos? "Must be a positive number."]]
 
      [nil "--particledb-port NUMBER" "What port should we connect to when talking to the ParticleDB interface?"
-      :default 5440
+      ; They changed this from 5440 to 5117 somewhere around 1.1.19-rc.13, I
+      ; think?
+      :default 7173
       :parse-fn parse-long]
 
      [nil "--postgres-password PASS" "What password should we use to connect to postgres?"
