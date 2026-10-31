@@ -1,7 +1,7 @@
 # ParticleDB Jepsen Tests
 
-This is a work-in-progress test suite for [ParticleDB](https://particledb.ai/)
-a Postgres-compatible database from Orkes.
+This is a test suite for [ParticleDB](https://particledb.ai/), a
+Postgres-compatible database from Orkes.
 
 ## Usage
 
